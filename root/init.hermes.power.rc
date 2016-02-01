@@ -8,9 +8,11 @@ on property:sys.perf.profile=0
 
 # Balanced
 on property:sys.perf.profile=1
-    write /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq "1950000"
+    write /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq "2158000"
     write /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq "403000"
-    write /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor "ondemand"
+    write /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor "interactive"
+	write /sys/devices/system/cpu/cpufreq/interactive/target_loads '90 403000:70 806000:80 1183000:84 1326000:88 1664000:92 1885000:96 2158000:99'     
+	write /proc/cpufreq/cpufreq_limited_max_freq_by_user "2158000"
 
 # Performance
 on property:sys.perf.profile=2
@@ -21,3 +23,9 @@ on property:sys.perf.profile=2
 on property:sys.boot_completed=1
 # Switch to balanced mode after boot for better UX
     setprop sys.perf.profile 1
+# Set Entropy
+	write /proc/sys/kernel/random/read_wakeup_threshold "2048"
+	write /proc/sys/kernel/random/write_wakeup_threshold "4096"
+	
+
+
