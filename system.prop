@@ -70,6 +70,7 @@ ro.mediatek.chip_ver=S01
 ro.mediatek.version.release=ALPS.L0.MP6.V3.18_LCSH6795.LWT.L_P154
 ro.mediatek.platform=MT6795
 ro.telephony.sim.count=2
+ro.telephony.ril.config=fakeiccid
 persist.radio.default.sim=0
 persist.radio.multisim.config=dsds
 persist.md.perm.checked=to_upgrade
