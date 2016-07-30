@@ -25,6 +25,10 @@ TARGET_RECOVERY_FSTAB := device/xiaomi/hermes/rootdir/recovery.fstab
 TARGET_RECOVERY_PIXEL_FORMAT := "RGBA_8888"
 TARGET_USERIMAGES_USE_EXT4 := true
 
+# ANT
+MTK_ANT_SUPPORT := yes
+BOARD_ANT_WIRELESS_DEVICE := "vfs-prerelease"
+
 # Miravision and clearmotion
 MTK_MIRAVISION_IMAGE_DC_SUPPORT = yes
 MTK_MIRAVISION_SETTING_SUPPORT = yes
