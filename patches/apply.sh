@@ -50,5 +50,12 @@ cd external/bluetooth/bluedroid/
 git reset --hard ; git clean -qfdx
 git apply -v ../../../device/xiaomi/hermes/patches/external_bluetooth_bluedroid/932c01b05465fbf1ae3933efa915902b7f30aec9.patch
 cd -
+cd bionic
+git reset --hard ; git clean -qfdx
+git apply -v ../device/xiaomi/hermes/patches/external_bluetooth_bluedroid/36764b95ebffdd579870373ba2c8b7c59b28e6dc.patch
+git apply -v ../device/xiaomi/hermes/patches/external_bluetooth_bluedroid/ceb12755ea7848c3473e861ecdd59d113752a5ca.patch
+git apply -v ../device/xiaomi/hermes/patches/external_bluetooth_bluedroid/3027288433a30440156f80f6b653a4a4563d2051.patch
+git apply -v ../device/xiaomi/hermes/patches/external_bluetooth_bluedroid/b30ee01616a34e2a7767f00ac47d31d0d8b4cb6e.patch
+cd -
 echo Patches Applied Successfully!
 

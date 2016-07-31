@@ -1,0 +1,23 @@
+From 36764b95ebffdd579870373ba2c8b7c59b28e6dc Mon Sep 17 00:00:00 2001
+From: Tim Murray <timmurray@google.com>
+Date: Thu, 11 Jun 2015 15:33:06 -0700
+Subject: [PATCH] Add support for cortex-a53 in bionic.
+
+allows -mcpu=cortex-a53 to be passed as part of a command line.
+
+Change-Id: Id4203a9fd197f4c3b661bad21ac58c32819fd687
+---
+ libc/arch-arm64/cortex-a53/cortex-a53.mk | 1 +
+ 1 file changed, 1 insertion(+)
+ create mode 100644 libc/arch-arm64/cortex-a53/cortex-a53.mk
+
+diff --git a/libc/arch-arm64/cortex-a53/cortex-a53.mk b/libc/arch-arm64/cortex-a53/cortex-a53.mk
+new file mode 100644
+index 0000000..676e886
+--- /dev/null
++++ b/libc/arch-arm64/cortex-a53/cortex-a53.mk
+@@ -0,0 +1 @@
++include bionic/libc/arch-arm64/generic/generic.mk
+-- 
+2.5.0
+

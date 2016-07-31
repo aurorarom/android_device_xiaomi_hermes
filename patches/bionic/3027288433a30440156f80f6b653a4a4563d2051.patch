@@ -1,0 +1,27 @@
+From 3027288433a30440156f80f6b653a4a4563d2051 Mon Sep 17 00:00:00 2001
+From: Dmitriy Ivanov <dimitry@google.com>
+Date: Wed, 8 Jul 2015 15:26:46 -0700
+Subject: [PATCH] Fix memory-leak on soinfo_free()
+
+Bug: http://b/22290728
+Change-Id: I00747056db2cd3ff8b33936278464daed7236536
+(cherry picked from commit 609f11b31ecedc4e9f2a1f6017b60b1f51b15c22)
+---
+ linker/linker.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/linker/linker.cpp b/linker/linker.cpp
+index 54867dc..47cdb50 100644
+--- a/linker/linker.cpp
++++ b/linker/linker.cpp
+@@ -332,6 +332,7 @@ static void soinfo_free(soinfo* si) {
+     sonext = prev;
+   }
+ 
++  si->~soinfo();
+   g_soinfo_allocator.free(si);
+ }
+ 
+-- 
+2.5.0
+

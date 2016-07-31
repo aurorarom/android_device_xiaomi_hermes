@@ -1,0 +1,1706 @@
+From b30ee01616a34e2a7767f00ac47d31d0d8b4cb6e Mon Sep 17 00:00:00 2001
+From: Jake Weinstein <xboxlover360@gmail.com>
+Date: Fri, 18 Sep 2015 15:02:39 +0000
+Subject: [PATCH] libc: ARM64: remove bcopy from memset
+
+* Deprecated by ce9ce28e5d760e32ab6c894dfaf7b8dad6de7ff6
+
+* Already removed from Denver memset
+
+Change-Id: I7beda29a799c7fa11f5a239d78626f4da1b581a2
+---
+ libc/arch-arm64/generic/bionic/memset.S | 15 ---------------
+ 1 file changed, 15 deletions(-)
+
+diff --git a/libc/arch-arm64/generic/bionic/memset.S b/libc/arch-arm64/generic/bionic/memset.S
+index 7c204b4..b9c0d50 100644
+--- a/libc/arch-arm64/generic/bionic/memset.S
++++ b/libc/arch-arm64/generic/bionic/memset.S
+@@ -45,11 +45,7 @@
+    values rather than re-reading them each call.  */
+ 
+ #define dstin		x0
+-#ifdef BZERO
+-#define count		x1
+-#else
+ #define count		x2
+-#endif
+ #define val		w1
+ #define tmp1		x3
+ #define tmp1w		w3
+@@ -64,16 +60,9 @@
+ #define dst		x8
+ #define tmp3w		w9
+ 
+-#ifdef BZERO
+-ENTRY(bzero)
+-#else
+ ENTRY(memset)
+-#endif
+ 
+ 	mov	dst, dstin		/* Preserve return value.  */
+-#ifdef BZERO
+-	b	.Lzero_mem
+-#endif
+ 	ands	A_lw, val, #255
+ 	b.eq	.Lzero_mem
+ 	orr	A_lw, A_lw, A_lw, lsl #8
+@@ -233,11 +222,7 @@ ENTRY(memset)
+ 	ands	count, count, zva_bits_x
+ 	b.ne	.Ltail_maybe_long
+ 	ret
+-#ifdef BZERO
+-END(bzero)
+-#else
+ END(memset)
+-#endif
+ 
+ #ifdef MAYBE_VIRT
+ 	.bss
+-- 
+2.5.0
+
+From 61ec3446e10b1d08af950623ad97f914653b387d Mon Sep 17 00:00:00 2001
+From: Wilco Dijkstra <wdijkstr@arm.com>
+Date: Mon, 13 Jul 2015 13:03:00 +0100
+Subject: [PATCH] libc: ARM64: optimize memmove
+
+ This is an optimized memmove for AArch64.  All copies of up to 96
+ bytes and all backward copies are done by the new memcpy.  The only
+ remaining case is large forward copies which are done in the same way
+ as the memcpy loop, but copying from the end rather than the start.
+
+Change-Id: I635bd2798a755256f748b2af19b1a56fb85a40c6
+---
+ libc/arch-arm64/generic/bionic/memmove.S | 386 +++++++++----------------------
+ 1 file changed, 105 insertions(+), 281 deletions(-)
+
+diff --git a/libc/arch-arm64/generic/bionic/memmove.S b/libc/arch-arm64/generic/bionic/memmove.S
+index 739ce49..c50112d 100644
+--- a/libc/arch-arm64/generic/bionic/memmove.S
++++ b/libc/arch-arm64/generic/bionic/memmove.S
+@@ -1,4 +1,4 @@
+-/* Copyright (c) 2014, Linaro Limited
++/* Copyright (c) 2013, Linaro Limited
+    All rights reserved.
+ 
+    Redistribution and use in source and binary forms, with or without
+@@ -22,14 +22,39 @@
+    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-*/
++   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
++
++/*
++ * Copyright (c) 2015 ARM Ltd
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ * 3. The name of the company may not be used to endorse or promote
++ *    products derived from this software without specific prior written
++ *    permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY ARM LTD ``AS IS'' AND ANY EXPRESS OR IMPLIED
++ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
++ * IN NO EVENT SHALL ARM LTD BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
++ * TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
++ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
++ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
++ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
+ 
+ /* Assumptions:
+  *
+- * ARMv8-a, AArch64
+- * Unaligned accesses
+- * wchar_t is 4 bytes
++ * ARMv8-a, AArch64, unaligned accesses, wchar_t is 4 bytes
+  */
+ 
+ #include <private/bionic_asm.h>
+@@ -38,22 +63,25 @@
+ #define dstin	x0
+ #define src	x1
+ #define count	x2
+-#define tmp1	x3
+-#define tmp1w	w3
+-#define tmp2	x4
+-#define tmp2w	w4
+-#define tmp3	x5
+-#define tmp3w	w5
+-#define dst	x6
+-
+-#define A_l	x7
+-#define A_h	x8
+-#define B_l	x9
+-#define B_h	x10
+-#define C_l	x11
+-#define C_h	x12
+-#define D_l	x13
+-#define D_h	x14
++#define srcend	x3
++#define dstend	x4
++#define tmp1	x5
++#define A_l	x6
++#define A_h	x7
++#define B_l	x8
++#define B_h	x9
++#define C_l	x10
++#define C_h	x11
++#define D_l	x12
++#define D_h	x13
++#define E_l	count
++#define E_h	tmp1
++
++/* All memmoves up to 96 bytes are done by memcpy as it supports overlaps.
++   Larger backwards copies are also handled by memcpy. The only remaining
++   case is forward large copies.  The destination is aligned, and an
++   unrolled loop processes 64 bytes per iteration.
++*/
+ 
+ #if defined(WMEMMOVE)
+ ENTRY(wmemmove)
+@@ -61,267 +89,63 @@ ENTRY(wmemmove)
+ #else
+ ENTRY(memmove)
+ #endif
+-	cmp	dstin, src
+-	b.lo	.Ldownwards
+-	add	tmp1, src, count
+-	cmp	dstin, tmp1
+-	b.hs	memcpy		/* No overlap.  */
+-
+-	/* Upwards move with potential overlap.
+-	 * Need to move from the tail backwards.  SRC and DST point one
+-	 * byte beyond the remaining data to move.  */
+-	add	dst, dstin, count
+-	add	src, src, count
+-	cmp	count, #64
+-	b.ge	.Lmov_not_short_up
+-
+-	/* Deal with small moves quickly by dropping straight into the
+-	 * exit block.  */
+-.Ltail63up:
+-	/* Move up to 48 bytes of data.  At this point we only need the
+-	 * bottom 6 bits of count to be accurate.  */
+-	ands	tmp1, count, #0x30
+-	b.eq	.Ltail15up
+-	sub	dst, dst, tmp1
+-	sub	src, src, tmp1
+-	cmp	tmp1w, #0x20
+-	b.eq	1f
+-	b.lt	2f
+-	ldp	A_l, A_h, [src, #32]
+-	stp	A_l, A_h, [dst, #32]
+-1:
+-	ldp	A_l, A_h, [src, #16]
+-	stp	A_l, A_h, [dst, #16]
+-2:
+-	ldp	A_l, A_h, [src]
+-	stp	A_l, A_h, [dst]
+-.Ltail15up:
+-	/* Move up to 15 bytes of data.  Does not assume additional data
+-	 * being moved.  */
+-	tbz	count, #3, 1f
+-	ldr	tmp1, [src, #-8]!
+-	str	tmp1, [dst, #-8]!
+-1:
+-	tbz	count, #2, 1f
+-	ldr	tmp1w, [src, #-4]!
+-	str	tmp1w, [dst, #-4]!
+-1:
+-	tbz	count, #1, 1f
+-	ldrh	tmp1w, [src, #-2]!
+-	strh	tmp1w, [dst, #-2]!
+-1:
+-	tbz	count, #0, 1f
+-	ldrb	tmp1w, [src, #-1]
+-	strb	tmp1w, [dst, #-1]
+-1:
+-	ret
+-
+-.Lmov_not_short_up:
+-	/* We don't much care about the alignment of DST, but we want SRC
+-	 * to be 128-bit (16 byte) aligned so that we don't cross cache line
+-	 * boundaries on both loads and stores.  */
+-	ands	tmp2, src, #15		/* Bytes to reach alignment.  */
+-	b.eq	2f
+-	sub	count, count, tmp2
+-	/* Move enough data to reach alignment; unlike memcpy, we have to
+-	 * be aware of the overlap, which means we can't move data twice.  */
+-	tbz	tmp2, #3, 1f
+-	ldr	tmp1, [src, #-8]!
+-	str	tmp1, [dst, #-8]!
+-1:
+-	tbz	tmp2, #2, 1f
+-	ldr	tmp1w, [src, #-4]!
+-	str	tmp1w, [dst, #-4]!
+-1:
+-	tbz	tmp2, #1, 1f
+-	ldrh	tmp1w, [src, #-2]!
+-	strh	tmp1w, [dst, #-2]!
+-1:
+-	tbz	tmp2, #0, 1f
+-	ldrb	tmp1w, [src, #-1]!
+-	strb	tmp1w, [dst, #-1]!
+-1:
+-
+-	/* There may be less than 63 bytes to go now.  */
+-	cmp	count, #63
+-	b.le	.Ltail63up
++	sub	tmp1, dstin, src
++	cmp	count, 96
++	ccmp	tmp1, count, 2, hi
++	b.hs	memcpy
++
++	cbz	tmp1, 3f
++	add	dstend, dstin, count
++	add	srcend, src, count
++
++	/* Align dstend to 16 byte alignment so that we don't cross cache line
++	   boundaries on both loads and stores.	 There are at least 96 bytes
++	   to copy, so copy 16 bytes unaligned and then align.	The loop
++	   copies 64 bytes per iteration and prefetches one iteration ahead.  */
++
++	and	tmp1, dstend, 15
++	ldp	D_l, D_h, [srcend, -16]
++	sub	srcend, srcend, tmp1
++	sub	count, count, tmp1
++	ldp	A_l, A_h, [srcend, -16]
++	stp	D_l, D_h, [dstend, -16]
++	ldp	B_l, B_h, [srcend, -32]
++	ldp	C_l, C_h, [srcend, -48]
++	ldp	D_l, D_h, [srcend, -64]!
++	sub	dstend, dstend, tmp1
++	subs	count, count, 128
++	b.ls	2f
++	nop
++1:
++	stp	A_l, A_h, [dstend, -16]
++	ldp	A_l, A_h, [srcend, -16]
++	stp	B_l, B_h, [dstend, -32]
++	ldp	B_l, B_h, [srcend, -32]
++	stp	C_l, C_h, [dstend, -48]
++	ldp	C_l, C_h, [srcend, -48]
++	stp	D_l, D_h, [dstend, -64]!
++	ldp	D_l, D_h, [srcend, -64]!
++	subs	count, count, 64
++	b.hi	1b
++
++	/* Write the last full set of 64 bytes.	 The remainder is at most 64
++	   bytes, so it is safe to always copy 64 bytes from the start even if
++	   there is just 1 byte left.  */
+ 2:
+-	subs	count, count, #128
+-	b.ge	.Lmov_body_large_up
+-	/* Less than 128 bytes to move, so handle 64 here and then jump
+-	 * to the tail.  */
+-	ldp	A_l, A_h, [src, #-64]!
+-	ldp	B_l, B_h, [src, #16]
+-	ldp	C_l, C_h, [src, #32]
+-	ldp	D_l, D_h, [src, #48]
+-	stp	A_l, A_h, [dst, #-64]!
+-	stp	B_l, B_h, [dst, #16]
+-	stp	C_l, C_h, [dst, #32]
+-	stp	D_l, D_h, [dst, #48]
+-	tst	count, #0x3f
+-	b.ne	.Ltail63up
+-	ret
++	ldp	E_l, E_h, [src, 48]
++	stp	A_l, A_h, [dstend, -16]
++	ldp	A_l, A_h, [src, 32]
++	stp	B_l, B_h, [dstend, -32]
++	ldp	B_l, B_h, [src, 16]
++	stp	C_l, C_h, [dstend, -48]
++	ldp	C_l, C_h, [src]
++	stp	D_l, D_h, [dstend, -64]
++	stp	E_l, E_h, [dstin, 48]
++	stp	A_l, A_h, [dstin, 32]
++	stp	B_l, B_h, [dstin, 16]
++	stp	C_l, C_h, [dstin]
++3:	ret
+ 
+-	/* Critical loop.  Start at a new Icache line boundary.  Assuming
+-	 * 64 bytes per line this ensures the entire loop is in one line.  */
+-	.p2align 6
+-.Lmov_body_large_up:
+-	/* There are at least 128 bytes to move.  */
+-	ldp	A_l, A_h, [src, #-16]
+-	ldp	B_l, B_h, [src, #-32]
+-	ldp	C_l, C_h, [src, #-48]
+-	ldp	D_l, D_h, [src, #-64]!
+-1:
+-	stp	A_l, A_h, [dst, #-16]
+-	ldp	A_l, A_h, [src, #-16]
+-	stp	B_l, B_h, [dst, #-32]
+-	ldp	B_l, B_h, [src, #-32]
+-	stp	C_l, C_h, [dst, #-48]
+-	ldp	C_l, C_h, [src, #-48]
+-	stp	D_l, D_h, [dst, #-64]!
+-	ldp	D_l, D_h, [src, #-64]!
+-	subs	count, count, #64
+-	b.ge	1b
+-	stp	A_l, A_h, [dst, #-16]
+-	stp	B_l, B_h, [dst, #-32]
+-	stp	C_l, C_h, [dst, #-48]
+-	stp	D_l, D_h, [dst, #-64]!
+-	tst	count, #0x3f
+-	b.ne	.Ltail63up
+-	ret
+-
+-
+-.Ldownwards:
+-	/* For a downwards move we can safely use memcpy provided that
+-	 * DST is more than 16 bytes away from SRC.  */
+-	sub	tmp1, src, #16
+-	cmp	dstin, tmp1
+-	b.ls	memcpy		/* May overlap, but not critically.  */
+-
+-	mov	dst, dstin	/* Preserve DSTIN for return value.  */
+-	cmp	count, #64
+-	b.ge	.Lmov_not_short_down
+-
+-	/* Deal with small moves quickly by dropping straight into the
+-	 * exit block.  */
+-.Ltail63down:
+-	/* Move up to 48 bytes of data.  At this point we only need the
+-	 * bottom 6 bits of count to be accurate.  */
+-	ands	tmp1, count, #0x30
+-	b.eq	.Ltail15down
+-	add	dst, dst, tmp1
+-	add	src, src, tmp1
+-	cmp	tmp1w, #0x20
+-	b.eq	1f
+-	b.lt	2f
+-	ldp	A_l, A_h, [src, #-48]
+-	stp	A_l, A_h, [dst, #-48]
+-1:
+-	ldp	A_l, A_h, [src, #-32]
+-	stp	A_l, A_h, [dst, #-32]
+-2:
+-	ldp	A_l, A_h, [src, #-16]
+-	stp	A_l, A_h, [dst, #-16]
+-.Ltail15down:
+-	/* Move up to 15 bytes of data.  Does not assume additional data
+-	   being moved.  */
+-	tbz	count, #3, 1f
+-	ldr	tmp1, [src], #8
+-	str	tmp1, [dst], #8
+-1:
+-	tbz	count, #2, 1f
+-	ldr	tmp1w, [src], #4
+-	str	tmp1w, [dst], #4
+-1:
+-	tbz	count, #1, 1f
+-	ldrh	tmp1w, [src], #2
+-	strh	tmp1w, [dst], #2
+-1:
+-	tbz	count, #0, 1f
+-	ldrb	tmp1w, [src]
+-	strb	tmp1w, [dst]
+-1:
+-	ret
+-
+-.Lmov_not_short_down:
+-	/* We don't much care about the alignment of DST, but we want SRC
+-	 * to be 128-bit (16 byte) aligned so that we don't cross cache line
+-	 * boundaries on both loads and stores.  */
+-	neg	tmp2, src
+-	ands	tmp2, tmp2, #15		/* Bytes to reach alignment.  */
+-	b.eq	2f
+-	sub	count, count, tmp2
+-	/* Move enough data to reach alignment; unlike memcpy, we have to
+-	 * be aware of the overlap, which means we can't move data twice.  */
+-	tbz	tmp2, #3, 1f
+-	ldr	tmp1, [src], #8
+-	str	tmp1, [dst], #8
+-1:
+-	tbz	tmp2, #2, 1f
+-	ldr	tmp1w, [src], #4
+-	str	tmp1w, [dst], #4
+-1:
+-	tbz	tmp2, #1, 1f
+-	ldrh	tmp1w, [src], #2
+-	strh	tmp1w, [dst], #2
+-1:
+-	tbz	tmp2, #0, 1f
+-	ldrb	tmp1w, [src], #1
+-	strb	tmp1w, [dst], #1
+-1:
+-
+-	/* There may be less than 63 bytes to go now.  */
+-	cmp	count, #63
+-	b.le	.Ltail63down
+-2:
+-	subs	count, count, #128
+-	b.ge	.Lmov_body_large_down
+-	/* Less than 128 bytes to move, so handle 64 here and then jump
+-	 * to the tail.  */
+-	ldp	A_l, A_h, [src]
+-	ldp	B_l, B_h, [src, #16]
+-	ldp	C_l, C_h, [src, #32]
+-	ldp	D_l, D_h, [src, #48]
+-	stp	A_l, A_h, [dst]
+-	stp	B_l, B_h, [dst, #16]
+-	stp	C_l, C_h, [dst, #32]
+-	stp	D_l, D_h, [dst, #48]
+-	tst	count, #0x3f
+-	add	src, src, #64
+-	add	dst, dst, #64
+-	b.ne	.Ltail63down
+-	ret
+-
+-	/* Critical loop.  Start at a new cache line boundary.  Assuming
+-	 * 64 bytes per line this ensures the entire loop is in one line.  */
+-	.p2align 6
+-.Lmov_body_large_down:
+-	/* There are at least 128 bytes to move.  */
+-	ldp	A_l, A_h, [src, #0]
+-	sub	dst, dst, #16		/* Pre-bias.  */
+-	ldp	B_l, B_h, [src, #16]
+-	ldp	C_l, C_h, [src, #32]
+-	ldp	D_l, D_h, [src, #48]!	/* src += 64 - Pre-bias.  */
+-1:
+-	stp	A_l, A_h, [dst, #16]
+-	ldp	A_l, A_h, [src, #16]
+-	stp	B_l, B_h, [dst, #32]
+-	ldp	B_l, B_h, [src, #32]
+-	stp	C_l, C_h, [dst, #48]
+-	ldp	C_l, C_h, [src, #48]
+-	stp	D_l, D_h, [dst, #64]!
+-	ldp	D_l, D_h, [src, #64]!
+-	subs	count, count, #64
+-	b.ge	1b
+-	stp	A_l, A_h, [dst, #16]
+-	stp	B_l, B_h, [dst, #32]
+-	stp	C_l, C_h, [dst, #48]
+-	stp	D_l, D_h, [dst, #64]
+-	add	src, src, #16
+-	add	dst, dst, #64 + 16
+-	tst	count, #0x3f
+-	b.ne	.Ltail63down
+-	ret
+ #if defined(WMEMMOVE)
+ END(wmemmove)
+ #else
+-- 
+2.5.0
+
+From 206e7924cb069af5ffca32981de54e7666c4927e Mon Sep 17 00:00:00 2001
+From: Wilco Dijkstra <wdijkstr@arm.com>
+Date: Mon, 13 Jul 2015 13:09:00 +0100
+Subject: [PATCH] libc: ARM64: Optimize memcpy.
+
+ This is an optimized memcpy for AArch64.  Copies are split into 3 main
+ cases: small copies of up to 16 bytes, medium copies of 17..96 bytes
+ which are fully unrolled.  Large copies of more than 96 bytes align
+ the destination and use an unrolled loop processing 64 bytes per
+ iteration.  In order to share code with memmove, small and medium
+ copies read all data before writing, allowing any kind of overlap.  On
+ a random copy test memcpy is 40.8% faster on A57 and 28.4% on A53.
+
+Change-Id: Ibb9483e45bbc0e8ca3d5ce98a31c55dfd8a5ac28
+---
+ libc/arch-arm64/generic/bionic/memcpy_base.S | 295 +++++++++++++++------------
+ 1 file changed, 162 insertions(+), 133 deletions(-)
+
+diff --git a/libc/arch-arm64/generic/bionic/memcpy_base.S b/libc/arch-arm64/generic/bionic/memcpy_base.S
+index c5d42ce..82431a3 100644
+--- a/libc/arch-arm64/generic/bionic/memcpy_base.S
++++ b/libc/arch-arm64/generic/bionic/memcpy_base.S
+@@ -1,4 +1,4 @@
+-/* Copyright (c) 2012, Linaro Limited
++/* Copyright (c) 2012-2013, Linaro Limited
+    All rights reserved.
+ 
+    Redistribution and use in source and binary forms, with or without
+@@ -22,158 +22,187 @@
+    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-*/
++   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
++
++/*
++ * Copyright (c) 2015 ARM Ltd
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ * 3. The name of the company may not be used to endorse or promote
++ *    products derived from this software without specific prior written
++ *    permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY ARM LTD ``AS IS'' AND ANY EXPRESS OR IMPLIED
++ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
++ * IN NO EVENT SHALL ARM LTD BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
++ * TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
++ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
++ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
++ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
+ 
+ /* Assumptions:
+  *
+- * ARMv8-a, AArch64
+- * Unaligned accesses
++ * ARMv8-a, AArch64, unaligned accesses.
+  *
+  */
+ 
++#include <private/bionic_asm.h>
++
+ #define dstin	x0
+ #define src	x1
+ #define count	x2
+-#define tmp1	x3
+-#define tmp1w	w3
+-#define tmp2	x4
+-#define tmp2w	w4
+-#define tmp3	x5
+-#define tmp3w	w5
+-#define dst	x6
++#define dst	x3
++#define srcend	x4
++#define dstend	x5
++#define A_l	x6
++#define A_lw	w6
++#define A_h	x7
++#define A_hw	w7
++#define B_l	x8
++#define B_h	x9
++#define C_l	x10
++#define C_h	x11
++#define D_l	x12
++#define D_h	x13
++#define E_l	src
++#define E_h	count
++#define F_l	srcend
++#define F_h	dst
++#define tmp1	x9
+ 
+-#define A_l	x7
+-#define A_h	x8
+-#define B_l	x9
+-#define B_h	x10
+-#define C_l	x11
+-#define C_h	x12
+-#define D_l	x13
+-#define D_h	x14
++#define L(l) .L ## l
+ 
+-	mov	dst, dstin
+-	cmp	count, #64
+-	b.ge	.Lcpy_not_short
+-	cmp	count, #15
+-	b.le	.Ltail15tiny
++/* Copies are split into 3 main cases: small copies of up to 16 bytes,
++   medium copies of 17..96 bytes which are fully unrolled. Large copies
++   of more than 96 bytes align the destination and use an unrolled loop
++   processing 64 bytes per iteration.
++   Small and medium copies read all data before writing, allowing any
++   kind of overlap, and memmove tailcalls memcpy for these cases as
++   well as non-overlapping copies.
++*/
+ 
+-	/* Deal with small copies quickly by dropping straight into the
+-	 * exit block.  */
+-.Ltail63:
+-	/* Copy up to 48 bytes of data.  At this point we only need the
+-	 * bottom 6 bits of count to be accurate.  */
+-	ands	tmp1, count, #0x30
+-	b.eq	.Ltail15
+-	add	dst, dst, tmp1
+-	add	src, src, tmp1
+-	cmp	tmp1w, #0x20
+-	b.eq	1f
+-	b.lt	2f
+-	ldp	A_l, A_h, [src, #-48]
+-	stp	A_l, A_h, [dst, #-48]
+-1:
+-	ldp	A_l, A_h, [src, #-32]
+-	stp	A_l, A_h, [dst, #-32]
+-2:
+-	ldp	A_l, A_h, [src, #-16]
+-	stp	A_l, A_h, [dst, #-16]
++	add	srcend, src, count
++	add	dstend, dstin, count
++	cmp	count, 96
++	b.hi	L(copy_long)
++	cmp	count, 16
++	b.hs	L(copy_medium)
+ 
+-.Ltail15:
+-	ands	count, count, #15
+-	beq	1f
+-	add	src, src, count
+-	ldp	A_l, A_h, [src, #-16]
+-	add	dst, dst, count
+-	stp	A_l, A_h, [dst, #-16]
+-1:
++	/* Small copies: 0..16 bytes.  */
++L(copy16):
++	tbz	count, 3, 1f
++	ldr	A_l, [src]
++	ldr	A_h, [srcend, -8]
++	str	A_l, [dstin]
++	str	A_h, [dstend, -8]
+ 	ret
+-
+-.Ltail15tiny:
+-	/* Copy up to 15 bytes of data.  Does not assume additional data
+-	   being copied.  */
+-	tbz	count, #3, 1f
+-	ldr	tmp1, [src], #8
+-	str	tmp1, [dst], #8
+ 1:
+-	tbz	count, #2, 1f
+-	ldr	tmp1w, [src], #4
+-	str	tmp1w, [dst], #4
+-1:
+-	tbz	count, #1, 1f
+-	ldrh	tmp1w, [src], #2
+-	strh	tmp1w, [dst], #2
++	tbz	count, 2, 1f
++	ldr	A_lw, [src]
++	ldr	A_hw, [srcend, -4]
++	str	A_lw, [dstin]
++	str	A_hw, [dstend, -4]
++	ret
++	.p2align 4
+ 1:
+-	tbz	count, #0, 1f
+-	ldrb	tmp1w, [src]
+-	strb	tmp1w, [dst]
++	cbz	count, 2f
++	ldrb	A_lw, [src]
++	tbz	count, 1, 1f
++	ldrh	A_hw, [srcend, -2]
++	strh	A_hw, [dstend, -2]
++1:	strb	A_lw, [dstin]
++2:	ret
++
++	.p2align 4
++	/* Medium copies: 17..96 bytes.	 */
++L(copy_medium):
++	ldp	A_l, A_h, [src]
++	tbnz	count, 6, L(copy96)
++	ldp	D_l, D_h, [srcend, -16]
++	tbz	count, 5, 1f
++	ldp	B_l, B_h, [src, 16]
++	ldp	C_l, C_h, [srcend, -32]
++	stp	B_l, B_h, [dstin, 16]
++	stp	C_l, C_h, [dstend, -32]
+ 1:
++	stp	A_l, A_h, [dstin]
++	stp	D_l, D_h, [dstend, -16]
+ 	ret
+ 
+-.Lcpy_not_short:
+-	/* We don't much care about the alignment of DST, but we want SRC
+-	 * to be 128-bit (16 byte) aligned so that we don't cross cache line
+-	 * boundaries on both loads and stores.  */
+-	neg	tmp2, src
+-	ands	tmp2, tmp2, #15		/* Bytes to reach alignment.  */
+-	b.eq	2f
+-	sub	count, count, tmp2
+-	/* Copy more data than needed; it's faster than jumping
+-	 * around copying sub-Quadword quantities.  We know that
+-	 * it can't overrun.  */
+-	ldp	A_l, A_h, [src]
+-	add	src, src, tmp2
+-	stp	A_l, A_h, [dst]
+-	add	dst, dst, tmp2
+-	/* There may be less than 63 bytes to go now.  */
+-	cmp	count, #63
+-	b.le	.Ltail63
+-2:
+-	subs	count, count, #128
+-	b.ge	.Lcpy_body_large
+-	/* Less than 128 bytes to copy, so handle 64 here and then jump
+-	 * to the tail.  */
+-	ldp	A_l, A_h, [src]
+-	ldp	B_l, B_h, [src, #16]
+-	ldp	C_l, C_h, [src, #32]
+-	ldp	D_l, D_h, [src, #48]
+-	stp	A_l, A_h, [dst]
+-	stp	B_l, B_h, [dst, #16]
+-	stp	C_l, C_h, [dst, #32]
+-	stp	D_l, D_h, [dst, #48]
+-	tst	count, #0x3f
+-	add	src, src, #64
+-	add	dst, dst, #64
+-	b.ne	.Ltail63
++	.p2align 4
++	/* Copy 64..96 bytes.  Copy 64 bytes from the start and
++	   32 bytes from the end.  */
++L(copy96):
++	ldp	B_l, B_h, [src, 16]
++	ldp	C_l, C_h, [src, 32]
++	ldp	D_l, D_h, [src, 48]
++	ldp	E_l, E_h, [srcend, -32]
++	ldp	F_l, F_h, [srcend, -16]
++	stp	A_l, A_h, [dstin]
++	stp	B_l, B_h, [dstin, 16]
++	stp	C_l, C_h, [dstin, 32]
++	stp	D_l, D_h, [dstin, 48]
++	stp	E_l, E_h, [dstend, -32]
++	stp	F_l, F_h, [dstend, -16]
+ 	ret
+ 
+-	/* Critical loop.  Start at a new cache line boundary.  Assuming
+-	 * 64 bytes per line this ensures the entire loop is in one line.  */
+-	.p2align 6
+-.Lcpy_body_large:
+-	/* There are at least 128 bytes to copy.  */
+-	ldp	A_l, A_h, [src, #0]
+-	sub	dst, dst, #16		/* Pre-bias.  */
+-	ldp	B_l, B_h, [src, #16]
+-	ldp	C_l, C_h, [src, #32]
+-	ldp	D_l, D_h, [src, #48]!	/* src += 64 - Pre-bias.  */
++	/* Align DST to 16 byte alignment so that we don't cross cache line
++	   boundaries on both loads and stores.	 There are at least 96 bytes
++	   to copy, so copy 16 bytes unaligned and then align.	The loop
++	   copies 64 bytes per iteration and prefetches one iteration ahead.  */
++
++	.p2align 4
++L(copy_long):
++	and	tmp1, dstin, 15
++	bic	dst, dstin, 15
++	ldp	D_l, D_h, [src]
++	sub	src, src, tmp1
++	add	count, count, tmp1	/* Count is now 16 too large.  */
++	ldp	A_l, A_h, [src, 16]
++	stp	D_l, D_h, [dstin]
++	ldp	B_l, B_h, [src, 32]
++	ldp	C_l, C_h, [src, 48]
++	ldp	D_l, D_h, [src, 64]!
++	subs	count, count, 128 + 16	/* Test and readjust count.  */
++	b.ls	2f
+ 1:
+-	stp	A_l, A_h, [dst, #16]
+-	ldp	A_l, A_h, [src, #16]
+-	stp	B_l, B_h, [dst, #32]
+-	ldp	B_l, B_h, [src, #32]
+-	stp	C_l, C_h, [dst, #48]
+-	ldp	C_l, C_h, [src, #48]
+-	stp	D_l, D_h, [dst, #64]!
+-	ldp	D_l, D_h, [src, #64]!
+-	subs	count, count, #64
+-	b.ge	1b
+-	stp	A_l, A_h, [dst, #16]
+-	stp	B_l, B_h, [dst, #32]
+-	stp	C_l, C_h, [dst, #48]
+-	stp	D_l, D_h, [dst, #64]
+-	add	src, src, #16
+-	add	dst, dst, #64 + 16
+-	tst	count, #0x3f
+-	b.ne	.Ltail63
++	stp	A_l, A_h, [dst, 16]
++	ldp	A_l, A_h, [src, 16]
++	stp	B_l, B_h, [dst, 32]
++	ldp	B_l, B_h, [src, 32]
++	stp	C_l, C_h, [dst, 48]
++	ldp	C_l, C_h, [src, 48]
++	stp	D_l, D_h, [dst, 64]!
++	ldp	D_l, D_h, [src, 64]!
++	subs	count, count, 64
++	b.hi	1b
++
++	/* Write the last full set of 64 bytes.	 The remainder is at most 64
++	   bytes, so it is safe to always copy 64 bytes from the end even if
++	   there is just 1 byte left.  */
++2:
++	ldp	E_l, E_h, [srcend, -64]
++	stp	A_l, A_h, [dst, 16]
++	ldp	A_l, A_h, [srcend, -48]
++	stp	B_l, B_h, [dst, 32]
++	ldp	B_l, B_h, [srcend, -32]
++	stp	C_l, C_h, [dst, 48]
++	ldp	C_l, C_h, [srcend, -16]
++	stp	D_l, D_h, [dst, 64]
++	stp	E_l, E_h, [dstend, -64]
++	stp	A_l, A_h, [dstend, -48]
++	stp	B_l, B_h, [dstend, -32]
++	stp	C_l, C_h, [dstend, -16]
+ 	ret
+-- 
+2.5.0
+
+From 82c98a738744106ac55b9f062f5d54153874511f Mon Sep 17 00:00:00 2001
+From: Wilco Dijkstra <wdijkstr@arm.com>
+Date: Thu, 30 Jul 2015 12:51:00 +0100
+Subject: [PATCH] libc: ARM64: optimize memset.
+
+ This is an optimized memset for AArch64.  Memset is split into 4 main
+ cases: small sets of up to 16 bytes, medium of 16..96 bytes which are
+ fully unrolled.  Large memsets of more than 96 bytes align the
+ destination and use an unrolled loop processing 64 bytes per
+ iteration.  Memsets of zero of more than 256 use the dc zva
+ instruction, and there are faster versions for the common ZVA sizes 64
+ or 128.  STP of Q registers is used to reduce codesize without loss of
+ performance.
+
+Change-Id: I0c5b5ec5ab8a1fd0f23eee8fbacada0be08e841f
+---
+ libc/arch-arm64/generic/bionic/memset.S | 376 ++++++++++++++++----------------
+ 1 file changed, 186 insertions(+), 190 deletions(-)
+
+diff --git a/libc/arch-arm64/generic/bionic/memset.S b/libc/arch-arm64/generic/bionic/memset.S
+index b9c0d50..4b3b17b 100644
+--- a/libc/arch-arm64/generic/bionic/memset.S
++++ b/libc/arch-arm64/generic/bionic/memset.S
+@@ -1,4 +1,4 @@
+-/* Copyright (c) 2012, Linaro Limited
++/* Copyright (c) 2012-2013, Linaro Limited
+    All rights reserved.
+ 
+    Redistribution and use in source and binary forms, with or without
+@@ -22,211 +22,207 @@
+    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-*/
++   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
++
++/*
++ * Copyright (c) 2015 ARM Ltd
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ * 3. The name of the company may not be used to endorse or promote
++ *    products derived from this software without specific prior written
++ *    permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY ARM LTD ``AS IS'' AND ANY EXPRESS OR IMPLIED
++ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
++ * IN NO EVENT SHALL ARM LTD BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
++ * TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
++ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
++ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
++ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
++ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
+ 
+ /* Assumptions:
+  *
+- * ARMv8-a, AArch64
+- * Unaligned accesses
++ * ARMv8-a, AArch64, unaligned accesses
+  *
+  */
+ 
+ #include <private/bionic_asm.h>
+ 
+-/* By default we assume that the DC instruction can be used to zero
+-   data blocks more efficiently.  In some circumstances this might be
+-   unsafe, for example in an asymmetric multiprocessor environment with
+-   different DC clear lengths (neither the upper nor lower lengths are
+-   safe to use).
+-
+-   If code may be run in a virtualized environment, then define
+-   MAYBE_VIRT.  This will cause the code to cache the system register
+-   values rather than re-reading them each call.  */
+-
+-#define dstin		x0
+-#define count		x2
+-#define val		w1
+-#define tmp1		x3
+-#define tmp1w		w3
+-#define tmp2		x4
+-#define tmp2w		w4
+-#define zva_len_x	x5
+-#define zva_len		w5
+-#define zva_bits_x	x6
+-
+-#define A_l		x7
+-#define A_lw		w7
+-#define dst		x8
+-#define tmp3w		w9
++#define dstin	x0
++#define val	x1
++#define valw	w1
++#define count	x2
++#define dst	x3
++#define dstend	x4
++#define tmp1	x5
++#define tmp1w	w5
++#define tmp2	x6
++#define tmp2w	w6
++#define zva_len x7
++#define zva_lenw w7
++
++#define L(l) .L ## l
+ 
+ ENTRY(memset)
+ 
+-	mov	dst, dstin		/* Preserve return value.  */
+-	ands	A_lw, val, #255
+-	b.eq	.Lzero_mem
+-	orr	A_lw, A_lw, A_lw, lsl #8
+-	orr	A_lw, A_lw, A_lw, lsl #16
+-	orr	A_l, A_l, A_l, lsl #32
+-.Ltail_maybe_long:
+-	cmp	count, #64
+-	b.ge	.Lnot_short
+-.Ltail_maybe_tiny:
+-	cmp	count, #15
+-	b.le	.Ltail15tiny
+-.Ltail63:
+-	ands	tmp1, count, #0x30
+-	b.eq	.Ltail15
+-	add	dst, dst, tmp1
+-	cmp	tmp1w, #0x20
+-	b.eq	1f
+-	b.lt	2f
+-	stp	A_l, A_l, [dst, #-48]
+-1:
+-	stp	A_l, A_l, [dst, #-32]
+-2:
+-	stp	A_l, A_l, [dst, #-16]
+-
+-.Ltail15:
+-	and	count, count, #15
+-	add	dst, dst, count
+-	stp	A_l, A_l, [dst, #-16]	/* Repeat some/all of last store. */
+-	ret
++	dup	v0.16B, valw
++	add	dstend, dstin, count
++
++	cmp	count, 96
++	b.hi	L(set_long)
++	cmp	count, 16
++	b.hs	L(set_medium)
++	mov	val, v0.D[0]
+ 
+-.Ltail15tiny:
+-	/* Set up to 15 bytes.  Does not assume earlier memory
+-	   being set.  */
+-	tbz	count, #3, 1f
+-	str	A_l, [dst], #8
+-1:
+-	tbz	count, #2, 1f
+-	str	A_lw, [dst], #4
+-1:
+-	tbz	count, #1, 1f
+-	strh	A_lw, [dst], #2
+-1:
+-	tbz	count, #0, 1f
+-	strb	A_lw, [dst]
+-1:
++	/* Set 0..15 bytes.  */
++	tbz	count, 3, 1f
++	str	val, [dstin]
++	str	val, [dstend, -8]
++	ret
++	nop
++1:	tbz	count, 2, 2f
++	str	valw, [dstin]
++	str	valw, [dstend, -4]
++	ret
++2:	cbz	count, 3f
++	strb	valw, [dstin]
++	tbz	count, 1, 3f
++	strh	valw, [dstend, -2]
++3:	ret
++
++	/* Set 17..96 bytes.  */
++L(set_medium):
++	str	q0, [dstin]
++	tbnz	count, 6, L(set96)
++	str	q0, [dstend, -16]
++	tbz	count, 5, 1f
++	str	q0, [dstin, 16]
++	str	q0, [dstend, -32]
++1:	ret
++
++	.p2align 4
++	/* Set 64..96 bytes.  Write 64 bytes from the start and
++	   32 bytes from the end.  */
++L(set96):
++	str	q0, [dstin, 16]
++	stp	q0, q0, [dstin, 32]
++	stp	q0, q0, [dstend, -32]
+ 	ret
+ 
+-	/* Critical loop.  Start at a new cache line boundary.  Assuming
+-	 * 64 bytes per line, this ensures the entire loop is in one line.  */
+-	.p2align 6
+-.Lnot_short:
+-	neg	tmp2, dst
+-	ands	tmp2, tmp2, #15
+-	b.eq	2f
+-	/* Bring DST to 128-bit (16-byte) alignment.  We know that there's
+-	 * more than that to set, so we simply store 16 bytes and advance by
+-	 * the amount required to reach alignment.  */
+-	sub	count, count, tmp2
+-	stp	A_l, A_l, [dst]
+-	add	dst, dst, tmp2
+-	/* There may be less than 63 bytes to go now.  */
+-	cmp	count, #63
+-	b.le	.Ltail63
+-2:
+-	sub	dst, dst, #16		/* Pre-bias.  */
+-	sub	count, count, #64
+-1:
+-	stp	A_l, A_l, [dst, #16]
+-	stp	A_l, A_l, [dst, #32]
+-	stp	A_l, A_l, [dst, #48]
+-	stp	A_l, A_l, [dst, #64]!
+-	subs	count, count, #64
+-	b.ge	1b
+-	tst	count, #0x3f
+-	add	dst, dst, #16
+-	b.ne	.Ltail63
++	.p2align 3
++	nop
++L(set_long):
++	and	valw, valw, 255
++	bic	dst, dstin, 15
++	str	q0, [dstin]
++	cmp	count, 256
++	ccmp	valw, 0, 0, cs
++	b.eq	L(try_zva)
++L(no_zva):
++	sub	count, dstend, dst	/* Count is 16 too large.  */
++	add	dst, dst, 16
++	sub	count, count, 64 + 16	/* Adjust count and bias for loop.  */
++1:	stp	q0, q0, [dst], 64
++	stp	q0, q0, [dst, -32]
++L(tail64):
++	subs	count, count, 64
++	b.hi	1b
++2:	stp	q0, q0, [dstend, -64]
++	stp	q0, q0, [dstend, -32]
+ 	ret
+ 
+-	/* For zeroing memory, check to see if we can use the ZVA feature to
+-	 * zero entire 'cache' lines.  */
+-.Lzero_mem:
+-	mov	A_l, #0
+-	cmp	count, #63
+-	b.le	.Ltail_maybe_tiny
+-	neg	tmp2, dst
+-	ands	tmp2, tmp2, #15
+-	b.eq	1f
+-	sub	count, count, tmp2
+-	stp	A_l, A_l, [dst]
+-	add	dst, dst, tmp2
+-	cmp	count, #63
+-	b.le	.Ltail63
+-1:
+-	/* For zeroing small amounts of memory, it's not worth setting up
+-	 * the line-clear code.  */
+-	cmp	count, #128
+-	b.lt	.Lnot_short
+-#ifdef MAYBE_VIRT
+-	/* For efficiency when virtualized, we cache the ZVA capability.  */
+-	adrp	tmp2, .Lcache_clear
+-	ldr	zva_len, [tmp2, #:lo12:.Lcache_clear]
+-	tbnz	zva_len, #31, .Lnot_short
+-	cbnz	zva_len, .Lzero_by_line
+-	mrs	tmp1, dczid_el0
+-	tbz	tmp1, #4, 1f
+-	/* ZVA not available.  Remember this for next time.  */
+-	mov	zva_len, #~0
+-	str	zva_len, [tmp2, #:lo12:.Lcache_clear]
+-	b	.Lnot_short
+-1:
+-	mov	tmp3w, #4
+-	and	zva_len, tmp1w, #15	/* Safety: other bits reserved.  */
+-	lsl	zva_len, tmp3w, zva_len
+-	str	zva_len, [tmp2, #:lo12:.Lcache_clear]
+-#else
++	.p2align 3
++L(try_zva):
+ 	mrs	tmp1, dczid_el0
+-	tbnz	tmp1, #4, .Lnot_short
+-	mov	tmp3w, #4
+-	and	zva_len, tmp1w, #15	/* Safety: other bits reserved.  */
+-	lsl	zva_len, tmp3w, zva_len
+-#endif
+-
+-.Lzero_by_line:
+-	/* Compute how far we need to go to become suitably aligned.  We're
+-	 * already at quad-word alignment.  */
+-	cmp	count, zva_len_x
+-	b.lt	.Lnot_short		/* Not enough to reach alignment.  */
+-	sub	zva_bits_x, zva_len_x, #1
+-	neg	tmp2, dst
+-	ands	tmp2, tmp2, zva_bits_x
+-	b.eq	1f			/* Already aligned.  */
+-	/* Not aligned, check that there's enough to copy after alignment.  */
+-	sub	tmp1, count, tmp2
+-	cmp	tmp1, #64
+-	ccmp	tmp1, zva_len_x, #8, ge	/* NZCV=0b1000 */
+-	b.lt	.Lnot_short
+-	/* We know that there's at least 64 bytes to zero and that it's safe
+-	 * to overrun by 64 bytes.  */
+-	mov	count, tmp1
+-2:
+-	stp	A_l, A_l, [dst]
+-	stp	A_l, A_l, [dst, #16]
+-	stp	A_l, A_l, [dst, #32]
+-	subs	tmp2, tmp2, #64
+-	stp	A_l, A_l, [dst, #48]
+-	add	dst, dst, #64
+-	b.ge	2b
+-	/* We've overrun a bit, so adjust dst downwards.  */
+-	add	dst, dst, tmp2
+-1:
+-	sub	count, count, zva_len_x
+-3:
+-	dc	zva, dst
+-	add	dst, dst, zva_len_x
+-	subs	count, count, zva_len_x
+-	b.ge	3b
+-	ands	count, count, zva_bits_x
+-	b.ne	.Ltail_maybe_long
++	tbnz	tmp1w, 4, L(no_zva)
++	and	tmp1w, tmp1w, 15
++	cmp	tmp1w, 4	/* ZVA size is 64 bytes.  */
++	b.ne	 L(zva_128)
++
++	/* Write the first and last 64 byte aligned block using stp rather
++	   than using DC ZVA.  This is faster on some cores.
++	 */
++L(zva_64):
++	str	q0, [dst, 16]
++	stp	q0, q0, [dst, 32]
++	bic	dst, dst, 63
++	stp	q0, q0, [dst, 64]
++	stp	q0, q0, [dst, 96]
++	sub	count, dstend, dst	/* Count is now 128 too large.	*/
++	sub	count, count, 128+64+64	/* Adjust count and bias for loop.  */
++	add	dst, dst, 128
++	nop
++1:	dc	zva, dst
++	add	dst, dst, 64
++	subs	count, count, 64
++	b.hi	1b
++	stp	q0, q0, [dst, 0]
++	stp	q0, q0, [dst, 32]
++	stp	q0, q0, [dstend, -64]
++	stp	q0, q0, [dstend, -32]
+ 	ret
+-END(memset)
+ 
+-#ifdef MAYBE_VIRT
+-	.bss
+-	.p2align 2
+-.Lcache_clear:
+-	.space 4
+-#endif
++	.p2align 3
++L(zva_128):
++	cmp	tmp1w, 5	/* ZVA size is 128 bytes.  */
++	b.ne	L(zva_other)
++
++	str	q0, [dst, 16]
++	stp	q0, q0, [dst, 32]
++	stp	q0, q0, [dst, 64]
++	stp	q0, q0, [dst, 96]
++	bic	dst, dst, 127
++	sub	count, dstend, dst	/* Count is now 128 too large.	*/
++	sub	count, count, 128+128	/* Adjust count and bias for loop.  */
++	add	dst, dst, 128
++1:	dc	zva, dst
++	add	dst, dst, 128
++	subs	count, count, 128
++	b.hi	1b
++	stp	q0, q0, [dstend, -128]
++	stp	q0, q0, [dstend, -96]
++	stp	q0, q0, [dstend, -64]
++	stp	q0, q0, [dstend, -32]
++	ret
++
++L(zva_other):
++	mov	tmp2w, 4
++	lsl	zva_lenw, tmp2w, tmp1w
++	add	tmp1, zva_len, 64	/* Max alignment bytes written.	 */
++	cmp	count, tmp1
++	blo	L(no_zva)
++
++	sub	tmp2, zva_len, 1
++	add	tmp1, dst, zva_len
++	add	dst, dst, 16
++	subs	count, tmp1, dst	/* Actual alignment bytes to write.  */
++	bic	tmp1, tmp1, tmp2	/* Aligned dc zva start address.  */
++	beq	2f
++1:	stp	q0, q0, [dst], 64
++	stp	q0, q0, [dst, -32]
++	subs	count, count, 64
++	b.hi	1b
++2:	mov	dst, tmp1
++	sub	count, dstend, tmp1	/* Remaining bytes to write.  */
++	subs	count, count, zva_len
++	b.lo	4f
++3:	dc	zva, dst
++	add	dst, dst, zva_len
++	subs	count, count, zva_len
++	b.hs	3b
++4:	add	count, count, zva_len
++	b	L(tail64)
++
++END(memset)
+-- 
+2.5.0
+
+From bbb568319cdb17e495d6e08780d2c7602ed071f2 Mon Sep 17 00:00:00 2001
+From: Wilco Dijkstra <wdijkstr@arm.com>
+Date: Tue, 20 Jan 2015 10:11:00 +0000
+Subject: [PATCH] libc: ARM64: improve performance in strlen
+
+Change-Id: Ic20f93a0052a49bd76cd6795f51e8606ccfbf11c
+---
+ libc/arch-arm64/generic/bionic/strlen.S | 243 ++++++++++++++++++++++----------
+ 1 file changed, 172 insertions(+), 71 deletions(-)
+
+diff --git a/libc/arch-arm64/generic/bionic/strlen.S b/libc/arch-arm64/generic/bionic/strlen.S
+index 3bd9809..6e540fc 100644
+--- a/libc/arch-arm64/generic/bionic/strlen.S
++++ b/libc/arch-arm64/generic/bionic/strlen.S
+@@ -1,16 +1,16 @@
+-/* Copyright (c) 2014, Linaro Limited
++/* Copyright (c) 2013-2015, Linaro Limited
+    All rights reserved.
+ 
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions are met:
+        * Redistributions of source code must retain the above copyright
+-         notice, this list of conditions and the following disclaimer.
++	 notice, this list of conditions and the following disclaimer.
+        * Redistributions in binary form must reproduce the above copyright
+-         notice, this list of conditions and the following disclaimer in the
+-         documentation and/or other materials provided with the distribution.
++	 notice, this list of conditions and the following disclaimer in the
++	 documentation and/or other materials provided with the distribution.
+        * Neither the name of the Linaro nor the
+-         names of its contributors may be used to endorse or promote products
+-         derived from this software without specific prior written permission.
++	 names of its contributors may be used to endorse or promote products
++	 derived from this software without specific prior written permission.
+ 
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+@@ -22,16 +22,19 @@
+    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-*/
++   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. */
+ 
+ /* Assumptions:
+  *
+- * ARMv8-a, AArch64
++ * ARMv8-a, AArch64, unaligned accesses, min page size 4k.
+  */
+ 
+ #include <private/bionic_asm.h>
+ 
++/* To test the page crossing code path more thoroughly, compile with
++   -DTEST_PAGE_CROSS - this will force all calls through the slower
++   entry path.  This option is not intended for production use.	 */
++
+ /* Arguments and results.  */
+ #define srcin		x0
+ #define len		x0
+@@ -40,87 +43,185 @@
+ #define src		x1
+ #define data1		x2
+ #define data2		x3
+-#define data2a		x4
+-#define has_nul1	x5
+-#define has_nul2	x6
+-#define tmp1		x7
+-#define tmp2		x8
+-#define tmp3		x9
+-#define tmp4		x10
+-#define zeroones	x11
+-#define pos		x12
++#define has_nul1	x4
++#define has_nul2	x5
++#define tmp1		x4
++#define tmp2		x5
++#define tmp3		x6
++#define tmp4		x7
++#define zeroones	x8
++
++#define L(l) .L ## l
++
++	/* NUL detection works on the principle that (X - 1) & (~X) & 0x80
++	   (=> (X - 1) & ~(X | 0x7f)) is non-zero iff a byte is zero, and
++	   can be done in parallel across the entire word. A faster check
++	   (X - 1) & 0x80 is zero for non-NUL ASCII characters, but gives
++	   false hits for characters 129..255.	*/
+ 
+ #define REP8_01 0x0101010101010101
+ #define REP8_7f 0x7f7f7f7f7f7f7f7f
+ #define REP8_80 0x8080808080808080
+ 
+-	/* Start of critial section -- keep to one 64Byte cache line.  */
++#ifdef TEST_PAGE_CROSS
++# define MIN_PAGE_SIZE 15
++#else
++# define MIN_PAGE_SIZE 4096
++#endif
++
++	/* Since strings are short on average, we check the first 16 bytes
++	   of the string for a NUL character.  In order to do an unaligned ldp
++	   safely we have to do a page cross check first.  If there is a NUL
++	   byte we calculate the length from the 2 8-byte words using
++	   conditional select to reduce branch mispredictions (it is unlikely
++	   strlen will be repeatedly called on strings with the same length).
++
++	   If the string is longer than 16 bytes, we align src so don't need
++	   further page cross checks, and process 32 bytes per iteration
++	   using the fast NUL check.  If we encounter non-ASCII characters,
++	   fallback to a second loop using the full NUL check.
++
++	   If the page cross check fails, we read 16 bytes from an aligned
++	   address, remove any characters before the string, and continue
++	   in the main loop using aligned loads.  Since strings crossing a
++	   page in the first 16 bytes are rare (probability of
++	   16/MIN_PAGE_SIZE ~= 0.4%), this case does not need to be optimized.
++
++	   AArch64 systems have a minimum page size of 4k.  We don't bother
++	   checking for larger page sizes - the cost of setting up the correct
++	   page size is just not worth the extra gain from a small reduction in
++	   the cases taking the slow path.  Note that we only care about
++	   whether the first fetch, which may be misaligned, crosses a page
++	   boundary.  */
++
+ ENTRY(strlen)
+-	mov	zeroones, #REP8_01
+-	bic	src, srcin, #15
+-	ands	tmp1, srcin, #15
+-	b.ne	.Lmisaligned
+-	/* NUL detection works on the principle that (X - 1) & (~X) & 0x80
+-	   (=> (X - 1) & ~(X | 0x7f)) is non-zero iff a byte is zero, and
+-	   can be done in parallel across the entire word.  */
+-	/* The inner loop deals with two Dwords at a time.  This has a
+-	   slightly higher start-up cost, but we should win quite quickly,
+-	   especially on cores with a high number of issue slots per
+-	   cycle, as we get much better parallelism out of the operations.  */
+-.Lloop:
+-	ldp	data1, data2, [src], #16
+-.Lrealigned:
++	and	tmp1, srcin, MIN_PAGE_SIZE - 1
++	mov	zeroones, REP8_01
++	cmp	tmp1, MIN_PAGE_SIZE - 16
++	b.gt	L(page_cross)
++	ldp	data1, data2, [srcin]
++#ifdef __AARCH64EB__
++	/* For big-endian, carry propagation (if the final byte in the
++	   string is 0x01) means we cannot use has_nul1/2 directly.
++	   Since we expect strings to be small and early-exit,
++	   byte-swap the data now so has_null1/2 will be correct.  */
++	rev	data1, data1
++	rev	data2, data2
++#endif
+ 	sub	tmp1, data1, zeroones
+-	orr	tmp2, data1, #REP8_7f
++	orr	tmp2, data1, REP8_7f
+ 	sub	tmp3, data2, zeroones
+-	orr	tmp4, data2, #REP8_7f
+-	bic	has_nul1, tmp1, tmp2
+-	bics	has_nul2, tmp3, tmp4
+-	ccmp	has_nul1, #0, #0, eq	/* NZCV = 0000  */
+-	b.eq	.Lloop
+-	/* End of critical section -- keep to one 64Byte cache line.  */
++	orr	tmp4, data2, REP8_7f
++	bics	has_nul1, tmp1, tmp2
++	bic	has_nul2, tmp3, tmp4
++	ccmp	has_nul2, 0, 0, eq
++	beq	L(main_loop_entry)
+ 
+-	sub	len, src, srcin
+-	cbz	has_nul1, .Lnul_in_data2
+-#ifdef __AARCH64EB__
+-	mov	data2, data1
+-#endif
+-	sub	len, len, #8
+-	mov	has_nul2, has_nul1
+-.Lnul_in_data2:
++	/* Enter with C = has_nul1 == 0.  */
++	csel	has_nul1, has_nul1, has_nul2, cc
++	mov	len, 8
++	rev	has_nul1, has_nul1
++	clz	tmp1, has_nul1
++	csel	len, xzr, len, cc
++	add	len, len, tmp1, lsr 3
++	ret
++
++	/* The inner loop processes 32 bytes per iteration and uses the fast
++	   NUL check.  If we encounter non-ASCII characters, use a second
++	   loop with the accurate NUL check.  */
++	.p2align 4
++L(main_loop_entry):
++	bic	src, srcin, 15
++	sub	src, src, 16
++L(main_loop):
++	ldp	data1, data2, [src, 32]!
++.Lpage_cross_entry:
++	sub	tmp1, data1, zeroones
++	sub	tmp3, data2, zeroones
++	orr	tmp2, tmp1, tmp3
++	tst	tmp2, zeroones, lsl 7
++	bne	1f
++	ldp	data1, data2, [src, 16]
++	sub	tmp1, data1, zeroones
++	sub	tmp3, data2, zeroones
++	orr	tmp2, tmp1, tmp3
++	tst	tmp2, zeroones, lsl 7
++	beq	L(main_loop)
++	add	src, src, 16
++1:
++	/* The fast check failed, so do the slower, accurate NUL check.	 */
++	orr	tmp2, data1, REP8_7f
++	orr	tmp4, data2, REP8_7f
++	bics	has_nul1, tmp1, tmp2
++	bic	has_nul2, tmp3, tmp4
++	ccmp	has_nul2, 0, 0, eq
++	beq	L(nonascii_loop)
++
++	/* Enter with C = has_nul1 == 0.  */
++L(tail):
+ #ifdef __AARCH64EB__
+ 	/* For big-endian, carry propagation (if the final byte in the
+-	   string is 0x01) means we cannot use has_nul directly.  The
++	   string is 0x01) means we cannot use has_nul1/2 directly.  The
+ 	   easiest way to get the correct byte is to byte-swap the data
+ 	   and calculate the syndrome a second time.  */
+-	rev	data2, data2
+-	sub	tmp1, data2, zeroones
+-	orr	tmp2, data2, #REP8_7f
+-	bic	has_nul2, tmp1, tmp2
++	csel	data1, data1, data2, cc
++	rev	data1, data1
++	sub	tmp1, data1, zeroones
++	orr	tmp2, data1, REP8_7f
++	bic	has_nul1, tmp1, tmp2
++#else
++	csel	has_nul1, has_nul1, has_nul2, cc
+ #endif
+-	sub	len, len, #8
+-	rev	has_nul2, has_nul2
+-	clz	pos, has_nul2
+-	add	len, len, pos, lsr #3		/* Bits to bytes.  */
++	sub	len, src, srcin
++	rev	has_nul1, has_nul1
++	add	tmp2, len, 8
++	clz	tmp1, has_nul1
++	csel	len, len, tmp2, cc
++	add	len, len, tmp1, lsr 3
+ 	ret
+ 
+-.Lmisaligned:
+-	cmp	tmp1, #8
+-	neg	tmp1, tmp1
+-	ldp	data1, data2, [src], #16
+-	lsl	tmp1, tmp1, #3		/* Bytes beyond alignment -> bits.  */
+-	mov	tmp2, #~0
++L(nonascii_loop):
++	ldp	data1, data2, [src, 16]!
++	sub	tmp1, data1, zeroones
++	orr	tmp2, data1, REP8_7f
++	sub	tmp3, data2, zeroones
++	orr	tmp4, data2, REP8_7f
++	bics	has_nul1, tmp1, tmp2
++	bic	has_nul2, tmp3, tmp4
++	ccmp	has_nul2, 0, 0, eq
++	bne	L(tail)
++	ldp	data1, data2, [src, 16]!
++	sub	tmp1, data1, zeroones
++	orr	tmp2, data1, REP8_7f
++	sub	tmp3, data2, zeroones
++	orr	tmp4, data2, REP8_7f
++	bics	has_nul1, tmp1, tmp2
++	bic	has_nul2, tmp3, tmp4
++	ccmp	has_nul2, 0, 0, eq
++	beq	L(nonascii_loop)
++	b	L(tail)
++
++	/* Load 16 bytes from [srcin & ~15] and force the bytes that precede
++	   srcin to 0x7f, so we ignore any NUL bytes before the string.
++	   Then continue in the aligned loop.  */
++L(page_cross):
++	bic	src, srcin, 15
++	ldp	data1, data2, [src]
++	lsl	tmp1, srcin, 3
++	mov	tmp4, -1
+ #ifdef __AARCH64EB__
+-	/* Big-endian.  Early bytes are at MSB.  */
+-	lsl	tmp2, tmp2, tmp1	/* Shift (tmp1 & 63).  */
++	/* Big-endian.	Early bytes are at MSB.	 */
++	lsr	tmp1, tmp4, tmp1	/* Shift (tmp1 & 63).  */
+ #else
+ 	/* Little-endian.  Early bytes are at LSB.  */
+-	lsr	tmp2, tmp2, tmp1	/* Shift (tmp1 & 63).  */
++	lsl	tmp1, tmp4, tmp1	/* Shift (tmp1 & 63).  */
+ #endif
+-	orr	data1, data1, tmp2
+-	orr	data2a, data2, tmp2
+-	csinv	data1, data1, xzr, le
+-	csel	data2, data2, data2a, le
+-	b	.Lrealigned
++	orr	tmp1, tmp1, REP8_80
++	orn	data1, data1, tmp1
++	orn	tmp2, data2, tmp1
++	tst	srcin, 8
++	csel	data1, data1, tmp4, eq
++	csel	data2, data2, tmp2, eq
++	b	L(page_cross_entry)
+ 
+ END(strlen)
+-- 
+2.5.0
+
+From c9f4c85ad3c64b45bcae899204d37397417a822e Mon Sep 17 00:00:00 2001
+From: Wilco Dijkstra <Wilco.Dijkstra@arm.com>
+Date: Fri, 6 Nov 2015 14:09:00 +0000
+Subject: [PATCH] libc: AArch64: Tune memcpy
+
+* Further tuning for performance.
+
+Change-Id: Id08eaab885f9743fa7575077924a947c1b88e4ff
+---
+ libc/arch-arm64/generic/bionic/memcpy_base.S | 57 ++++++++++++++++------------
+ 1 file changed, 33 insertions(+), 24 deletions(-)
+
+diff --git a/libc/arch-arm64/generic/bionic/memcpy_base.S b/libc/arch-arm64/generic/bionic/memcpy_base.S
+index 82431a3..f850624 100644
+--- a/libc/arch-arm64/generic/bionic/memcpy_base.S
++++ b/libc/arch-arm64/generic/bionic/memcpy_base.S
+@@ -71,6 +71,7 @@
+ #define A_h	x7
+ #define A_hw	w7
+ #define B_l	x8
++#define B_lw   w8
+ #define B_h	x9
+ #define C_l	x10
+ #define C_h	x11
+@@ -93,21 +94,41 @@
+    well as non-overlapping copies.
+ */
+ 
++	prfm    PLDL1KEEP, [src]
+ 	add	srcend, src, count
+ 	add	dstend, dstin, count
++        cmp     count, 16
++        b.ls    L(copy16)
+ 	cmp	count, 96
+ 	b.hi	L(copy_long)
+-	cmp	count, 16
+-	b.hs	L(copy_medium)
++
++	/* Medium copies: 17..96 bytes.  */
++	sub	tmp1, count, 1
++	ldp	A_l, A_h, [src]
++	tbnz	tmp1, 6, L(copy96)
++	ldp	D_l, D_h, [srcend, -16]
++	tbz	tmp1, 5, 1f
++	ldp	B_l, B_h, [src, 16]
++	ldp	C_l, C_h, [srcend, -32]
++	stp	B_l, B_h, [dstin, 16]
++	stp	C_l, C_h, [dstend, -32]
++1:
++	stp	A_l, A_h, [dstin]
++	stp	D_l, D_h, [dstend, -16]
++	ret
++
++	.p2align 4
+ 
+ 	/* Small copies: 0..16 bytes.  */
+ L(copy16):
+-	tbz	count, 3, 1f
++	cmp	count, 8
++	b.lo	1f
+ 	ldr	A_l, [src]
+ 	ldr	A_h, [srcend, -8]
+ 	str	A_l, [dstin]
+ 	str	A_h, [dstend, -8]
+ 	ret
++	.p2align 4
+ 1:
+ 	tbz	count, 2, 1f
+ 	ldr	A_lw, [src]
+@@ -115,33 +136,21 @@ L(copy16):
+ 	str	A_lw, [dstin]
+ 	str	A_hw, [dstend, -4]
+ 	ret
+-	.p2align 4
++
++	/* Copy 0..3 bytes.  Use a branchless sequence that copies the same
++	   byte 3 times if count==1, or the 2nd byte twice if count==2.  */
+ 1:
+ 	cbz	count, 2f
++	lsr	tmp1, count, 1
+ 	ldrb	A_lw, [src]
+-	tbz	count, 1, 1f
+-	ldrh	A_hw, [srcend, -2]
+-	strh	A_hw, [dstend, -2]
+-1:	strb	A_lw, [dstin]
++	ldrb	A_hw, [srcend, -1]
++	ldrb	B_lw, [src, tmp1]
++	strb	A_lw, [dstin]
++	strb	B_lw, [dstin, tmp1]
++	strb	A_hw, [dstend, -1]
+ 2:	ret
+ 
+ 	.p2align 4
+-	/* Medium copies: 17..96 bytes.	 */
+-L(copy_medium):
+-	ldp	A_l, A_h, [src]
+-	tbnz	count, 6, L(copy96)
+-	ldp	D_l, D_h, [srcend, -16]
+-	tbz	count, 5, 1f
+-	ldp	B_l, B_h, [src, 16]
+-	ldp	C_l, C_h, [srcend, -32]
+-	stp	B_l, B_h, [dstin, 16]
+-	stp	C_l, C_h, [dstend, -32]
+-1:
+-	stp	A_l, A_h, [dstin]
+-	stp	D_l, D_h, [dstend, -16]
+-	ret
+-
+-	.p2align 4
+ 	/* Copy 64..96 bytes.  Copy 64 bytes from the start and
+ 	   32 bytes from the end.  */
+ L(copy96):
+-- 
+2.5.0
+
