@@ -1,0 +1,23 @@
+From 932c01b05465fbf1ae3933efa915902b7f30aec9 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=C5=81ukasz=20Domeradzki?=
+ <JustArchi@users.noreply.github.com>
+Date: Mon, 10 Aug 2015 02:01:37 +0200
+Subject: [PATCH] Fix O3 SIGBUS
+
+---
+ main/Android.mk | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/main/Android.mk b/main/Android.mk
+index 626279f..690a20f 100644
+--- a/main/Android.mk
++++ b/main/Android.mk
+@@ -119,7 +119,7 @@ LOCAL_C_INCLUDES += . \
+     $(TOP)/frameworks/av/include/media \
+ 	external/tinyxml2
+ 
+-LOCAL_CFLAGS += -DBUILDCFG $(bdroid_CFLAGS) -Wno-error=maybe-uninitialized -Wno-error=uninitialized -Wno-error=unused-parameter
++LOCAL_CFLAGS += -DBUILDCFG $(bdroid_CFLAGS) -Os -Wno-error=maybe-uninitialized -Wno-error=uninitialized -Wno-error=unused-parameter
+ LOCAL_CONLYFLAGS := -std=c99
+ 
+ ifeq ($(TARGET_PRODUCT), full_crespo)
