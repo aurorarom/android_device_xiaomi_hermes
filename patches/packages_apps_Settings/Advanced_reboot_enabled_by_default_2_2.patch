@@ -1,0 +1,25 @@
+From f7e6b43a99b4f041def44d4c9cc172996a4bfccc Mon Sep 17 00:00:00 2001
+From: Andres Mora Montero <andresmora1676@gmail.com>
+Date: Sat, 21 Nov 2015 12:35:40 -0600
+Subject: [PATCH] Advanced reboot enabled by default (2/2)
+
+---
+ src/com/android/settings/DevelopmentSettings.java | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/com/android/settings/DevelopmentSettings.java b/src/com/android/settings/DevelopmentSettings.java
+index 61192b1..31efe0b 100644
+--- a/src/com/android/settings/DevelopmentSettings.java
++++ b/src/com/android/settings/DevelopmentSettings.java
+@@ -680,7 +680,7 @@ public class DevelopmentSettings extends SettingsPreferenceFragment
+ 
+     private void updateAdvancedRebootOptions() {
+         mAdvancedReboot.setChecked(Settings.Secure.getInt(getActivity().getContentResolver(),
+-                Settings.Secure.ADVANCED_REBOOT, 0) != 0);
++                Settings.Secure.ADVANCED_REBOOT, 1) != 0);
+     }
+ 
+     private void resetDevelopmentShortcutOptions() {
+-- 
+2.5.0
+

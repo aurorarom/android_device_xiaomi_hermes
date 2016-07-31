@@ -1,0 +1,407 @@
+From 53b2239ea162b864c5ae50763b63aa592acafa67 Mon Sep 17 00:00:00 2001
+From: arthur_hung <arthur_hung@htc.com>
+Date: Fri, 24 Apr 2015 16:14:50 +0800
+Subject: [PATCH] fix for crash when PDF printing in Chrome
+
+Symptom: open some site and print to PDF will crash
+
+Root Cause: the pdfium library use a global memory management but
+jni initialize/destroy it twice in different thread, that also make
+memory leak.
+
+Solution: keep one count and mutex for initial/destory pdfium
+library for PdfEditor and PdfRenderer
+
+Change-Id: Iee63ecb90d35b0a8afa7a3d891547eb8cb4f216d
+---
+ core/jni/android/graphics/pdf/PdfEditor.cpp   | 4 ++--
+ core/jni/android/graphics/pdf/PdfRenderer.cpp | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/core/jni/android/graphics/pdf/PdfEditor.cpp b/core/jni/android/graphics/pdf/PdfEditor.cpp
+index ed6f1d6..56ebcba 100644
+--- a/core/jni/android/graphics/pdf/PdfEditor.cpp
++++ b/core/jni/android/graphics/pdf/PdfEditor.cpp
+@@ -46,9 +46,9 @@ static struct {
+     jfieldID bottom;
+ } gRectClassInfo;
+ 
+-static Mutex sLock;
++Mutex sLock;
+ 
+-static int sUnmatchedInitRequestCount = 0;
++int sUnmatchedInitRequestCount = 0;
+ 
+ static void initializeLibraryIfNeeded() {
+     Mutex::Autolock _l(sLock);
+diff --git a/core/jni/android/graphics/pdf/PdfRenderer.cpp b/core/jni/android/graphics/pdf/PdfRenderer.cpp
+index 357d3c0..c5611b0 100644
+--- a/core/jni/android/graphics/pdf/PdfRenderer.cpp
++++ b/core/jni/android/graphics/pdf/PdfRenderer.cpp
+@@ -39,9 +39,9 @@ static struct {
+     jfieldID y;
+ } gPointClassInfo;
+ 
+-static Mutex sLock;
++extern Mutex sLock;
+ 
+-static int sUnmatchedInitRequestCount = 0;
++extern int sUnmatchedInitRequestCount;
+ 
+ static void initializeLibraryIfNeeded() {
+     Mutex::Autolock _l(sLock);
+-- 
+2.5.0
+
+From da40cd9da846da9c87f584ca980b825506866f5f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Bernhard=20Rosenkr=C3=A4nzer?=
+ <Bernhard.Rosenkranzer@linaro.org>
+Date: Mon, 17 Nov 2014 22:01:27 +0100
+Subject: [PATCH] Fix incorrect usage of bool
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A bool can't be < 0
+
+Change-Id: Ie94ffadcb38c95214d1105c02610e59b4b2872b2
+Signed-off-by: Bernhard Rosenkränzer <Bernhard.Rosenkranzer@linaro.org>
+---
+ core/jni/android/graphics/pdf/PdfEditor.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/core/jni/android/graphics/pdf/PdfEditor.cpp b/core/jni/android/graphics/pdf/PdfEditor.cpp
+index 56ebcba..225ce75 100644
+--- a/core/jni/android/graphics/pdf/PdfEditor.cpp
++++ b/core/jni/android/graphics/pdf/PdfEditor.cpp
+@@ -150,7 +150,7 @@ static bool writeAllBytes(const int fd, const void* buffer, const size_t byteCou
+ static int writeBlock(FPDF_FILEWRITE* owner, const void* buffer, unsigned long size) {
+     const PdfToFdWriter* writer = reinterpret_cast<PdfToFdWriter*>(owner);
+     const bool success = writeAllBytes(writer->dstFd, buffer, size);
+-    if (success < 0) {
++    if (!success) {
+         ALOGE("Cannot write to file descriptor. Error:%d", errno);
+         return 0;
+     }
+-- 
+2.5.0
+
+From 793dc6a144844f1b7f0a3ec392b1ec9a5b2f3023 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Romain=20Vimont=20=28=C2=AEom=29?= <rom@rom1v.com>
+Date: Thu, 5 Dec 2013 11:08:10 +0100
+Subject: [PATCH] Avoid duplicate call to onLoadFinished()
+
+When a loader is initialized in Fragment#onActivityCreated(Bundle), then
+LoadersCallback#onLoadFinished() was called twice on device orientation
+change:
+ - once during fragment start();
+ - once during loader finishRetain().
+
+Reported as bug 63179:
+https://code.google.com/p/android/issues/detail?id=63179
+
+This commit prevents to call onLoadFinished() when the data has already
+been delivered.
+
+Change-Id: I893013049f819dd5543a8079ce9d8025a5fdb2f1
+---
+ core/java/android/app/LoaderManager.java | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/core/java/android/app/LoaderManager.java b/core/java/android/app/LoaderManager.java
+index b13b24a..93d66c8 100644
+--- a/core/java/android/app/LoaderManager.java
++++ b/core/java/android/app/LoaderManager.java
+@@ -303,7 +303,7 @@ class LoaderManagerImpl extends LoaderManager {
+                 }
+             }
+ 
+-            if (mStarted && mHaveData && !mReportNextStart) {
++            if (mStarted && mHaveData && !mDeliveredData && !mReportNextStart) {
+                 // This loader has retained its data, either completely across
+                 // a configuration change or just whatever the last data set
+                 // was after being restarted from a stop, and now at the point of
+-- 
+2.5.0
+
+From 875d7fe034584b0ae06ee04edb32e00d62e9e146 Mon Sep 17 00:00:00 2001
+From: "joonyoung.cho" <joonyoung.cho@lge.com>
+Date: Thu, 30 Apr 2015 13:54:37 +0900
+Subject: [PATCH] fix to show inifinite resolveractivity
+
+if launcher app doesn't have a CATEGORY_DEFAULT,
+it always show resolveractivity for selecting launcher.
+because findPreferredActivity finds only CATEGORY_DEFAULT app.
+but getHomeActivities pass to all CATEGORY_HOME.
+
+Change-Id: I0f3d9670981a186e3e7291db4da3bb8e8e205c7c
+---
+ services/core/java/com/android/server/pm/PackageManagerService.java | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/services/core/java/com/android/server/pm/PackageManagerService.java b/services/core/java/com/android/server/pm/PackageManagerService.java
+index c4616b3..6a846a9 100755
+--- a/services/core/java/com/android/server/pm/PackageManagerService.java
++++ b/services/core/java/com/android/server/pm/PackageManagerService.java
+@@ -12977,6 +12977,7 @@ public class PackageManagerService extends IPackageManager.Stub {
+     public ComponentName getHomeActivities(List<ResolveInfo> allHomeCandidates) {
+         Intent intent = new Intent(Intent.ACTION_MAIN);
+         intent.addCategory(Intent.CATEGORY_HOME);
++        intent.addCategory(Intent.CATEGORY_DEFAULT);
+ 
+         final int callingUserId = UserHandle.getCallingUserId();
+         List<ResolveInfo> list = queryIntentActivities(intent, null,
+-- 
+2.5.0
+
+From 8dc8b2e36b07f6e81000e6cb010f1cee9cdf3b24 Mon Sep 17 00:00:00 2001
+From: tym_tsai <tym_tsai@htc.com>
+Date: Fri, 27 Mar 2015 11:54:05 +0800
+Subject: [PATCH] used commitAllowingStateLoss() avoid background commit crash
+
+If UI layout changed on background, commit will cause fragment manager throw exception.
+
+Change-Id: I753daaad5d42ea992b0215216d68250c971df15b
+---
+ .../PrintSpooler/src/com/android/printspooler/ui/PrintActivity.java     | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+ mode change 100644 => 100755 packages/PrintSpooler/src/com/android/printspooler/ui/PrintActivity.java
+
+diff --git a/packages/PrintSpooler/src/com/android/printspooler/ui/PrintActivity.java b/packages/PrintSpooler/src/com/android/printspooler/ui/PrintActivity.java
+old mode 100644
+new mode 100755
+index 2555888..e2799b7
+--- a/packages/PrintSpooler/src/com/android/printspooler/ui/PrintActivity.java
++++ b/packages/PrintSpooler/src/com/android/printspooler/ui/PrintActivity.java
+@@ -950,7 +950,7 @@ public class PrintActivity extends Activity implements RemotePrintDocument.Updat
+         if (newFragment != null) {
+             transaction.add(R.id.embedded_content_container, newFragment, FRAGMENT_TAG);
+         }
+-        transaction.commit();
++        transaction.commitAllowingStateLoss();
+         getFragmentManager().executePendingTransactions();
+     }
+ 
+-- 
+2.5.0
+
+From c86d5e2536f403f8b8248d98d8035126a83acdd6 Mon Sep 17 00:00:00 2001
+From: Richard Uhler <ruhler@google.com>
+Date: Mon, 9 Feb 2015 08:16:17 -0800
+Subject: [PATCH] Remove duplicate assignment statement.
+
+Change-Id: I169278b711bae715c78974ffb536f505f534ab89
+---
+ services/core/java/com/android/server/pm/PackageManagerService.java | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/services/core/java/com/android/server/pm/PackageManagerService.java b/services/core/java/com/android/server/pm/PackageManagerService.java
+index 6a846a9..0f87f61 100755
+--- a/services/core/java/com/android/server/pm/PackageManagerService.java
++++ b/services/core/java/com/android/server/pm/PackageManagerService.java
+@@ -6371,7 +6371,6 @@ public class PackageManagerService extends IPackageManager.Stub {
+                                 for (int j=0; j<sysPs.pkg.libraryNames.size(); j++) {
+                                     if (name.equals(sysPs.pkg.libraryNames.get(j))) {
+                                         allowed = true;
+-                                        allowed = true;
+                                         break;
+                                     }
+                                 }
+-- 
+2.5.0
+
+From 0213c5ff38e8a3e34e6b4de821afb66293030e36 Mon Sep 17 00:00:00 2001
+From: Scott Weber <scott.d.weber@gmail.com>
+Date: Fri, 21 Mar 2014 22:41:55 -0400
+Subject: [PATCH] Prevent erroneous calls to OnCheckedChangedListener
+
+This change updates the CheckedStateTracker so that it only
+updates the RadioGroup's checkedId when a RadioButton is
+checked. Previously, the CheckedStateTracker would call
+setCheckedId() even if it was responding to an uncheck
+event (e.g. when calling clearCheck() to uncheck all radio
+buttons). This would in turn cause a bogus call to the
+RadioGroup's OnCheckedChangedListener, falsely indicating
+to the listener that the unchecked RadioButton had just
+been checked.
+
+This issue is reported on b.android.com: Issue 4785
+
+Change-Id: Ida4d4be478db38b8972359055119b5e6d285c20e
+Signed-off-by: Scott Weber <scott.d.weber@gmail.com>
+---
+ core/java/android/widget/RadioGroup.java | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/core/java/android/widget/RadioGroup.java b/core/java/android/widget/RadioGroup.java
+index 78d05b0..a2e23b0 100644
+--- a/core/java/android/widget/RadioGroup.java
++++ b/core/java/android/widget/RadioGroup.java
+@@ -354,8 +354,10 @@ public class RadioGroup extends LinearLayout {
+             }
+             mProtectFromCheckedChange = false;
+ 
+-            int id = buttonView.getId();
+-            setCheckedId(id);
++            if (isChecked) {
++                int id = buttonView.getId();
++                setCheckedId(id);
++            }
+         }
+     }
+ 
+-- 
+2.5.0
+
+From 3f1bbb948f4b7c29addbdfc940e7e7f962564f4c Mon Sep 17 00:00:00 2001
+From: tiger_huang <tiger_huang@htc.com>
+Date: Tue, 17 Mar 2015 21:42:36 +0800
+Subject: [PATCH] Prevent duplicated immersive mode confirmation
+
+In the original logic, if there is someone calling
+immersiveModeChanged() twice with isImmersiveMode=true, we would
+get two immersive mode confirmation windows. The first one has no
+chances to be removed before system_server process dies.
+
+Change-Id: I6066336f78c14e07dc8ed4c7d2de22d2bbfb7b97
+---
+ .../com/android/internal/policy/impl/ImmersiveModeConfirmation.java    | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/policy/src/com/android/internal/policy/impl/ImmersiveModeConfirmation.java b/policy/src/com/android/internal/policy/impl/ImmersiveModeConfirmation.java
+index bcb69c1..720a4ba 100644
+--- a/policy/src/com/android/internal/policy/impl/ImmersiveModeConfirmation.java
++++ b/policy/src/com/android/internal/policy/impl/ImmersiveModeConfirmation.java
+@@ -297,6 +297,9 @@ public class ImmersiveModeConfirmation {
+     }
+ 
+     private void handleShow() {
++        if (mClingWindow != null) {
++            return;
++        }
+         if (DEBUG) Slog.d(TAG, "Showing immersive mode confirmation");
+ 
+         mClingWindow = new ClingWindowView(mContext, mConfirm);
+-- 
+2.5.0
+
+From 65951add186c3139fe59dbafca16ab062d67d685 Mon Sep 17 00:00:00 2001
+From: Evisceration <eviscerationls@gmail.com>
+Date: Wed, 21 May 2014 14:15:23 +0200
+Subject: [PATCH] aapt: silence these warnings
+
+to show them, set SHOW_MANIFEST_WARNING
+
+Change-Id: I8fd3617e03ca535df1ae0ebdb3dde3a67eb2737b
+Signed-off-by: Chet Kener <Cl3Kener@gmail.com>
+---
+ tools/aapt/Resource.cpp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tools/aapt/Resource.cpp b/tools/aapt/Resource.cpp
+index e94aebc..1fefb43 100644
+--- a/tools/aapt/Resource.cpp
++++ b/tools/aapt/Resource.cpp
+@@ -731,9 +731,11 @@ bool addTagAttribute(const sp<XMLNode>& node, const char* ns8,
+             return false;
+         }
+ 
++#ifdef SHOW_MANIFEST_WARNING
+         fprintf(stderr, "Warning: AndroidManifest.xml already defines %s (in %s);"
+                         " using existing value in manifest.\n",
+                 String8(attr).string(), String8(ns).string());
++#endif
+ 
+         // don't stop the build.
+         return true;
+-- 
+2.5.0
+
+From ee8d97255aee7ed3318df8408ff5d03c76cd18bb Mon Sep 17 00:00:00 2001
+From: "muzbit.kim" <muzbit.kim@lge.com>
+Date: Tue, 11 Mar 2014 16:19:57 +0900
+Subject: [PATCH] Change SQL to improve performance.
+
+To know the number of images, use "COUNT(*)" instead of "_id" in SQL.
+Using "_id" gets all result set. and when getCount() is called, CursorWindow is filled.
+But using "COUNT(*)" gets just 1by1 data.
+So using "COUNT(*)" is more faster than now.
+And this SQL is called everytime per a file during a file transfer in MTP
+The better way is by using "EXIST".
+But if using "EXIST", modify MediaProvider.call() method.
+So i applied just a "COUNT(*)"
+
+Change-Id: Ic5882af0fad2304f836b7b7043a4746359391609
+Signed-off-by: muzbit.kim <muzbit.kim@lge.com>
+---
+ media/java/android/media/MediaScanner.java | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+ mode change 100644 => 100755 media/java/android/media/MediaScanner.java
+
+diff --git a/media/java/android/media/MediaScanner.java b/media/java/android/media/MediaScanner.java
+old mode 100644
+new mode 100755
+index 7c58dca..93354f7
+--- a/media/java/android/media/MediaScanner.java
++++ b/media/java/android/media/MediaScanner.java
+@@ -1233,10 +1233,15 @@ public class MediaScanner
+ 
+         // compute original size of images
+         mOriginalCount = 0;
+-        c = mMediaProvider.query(mPackageName, mImagesUri, ID_PROJECTION, null, null, null, null);
+-        if (c != null) {
+-            mOriginalCount = c.getCount();
+-            c.close();
++        try {
++            c = mMediaProvider.query(mPackageName, mImagesUri, new String[] {"COUNT(*)"}, null, null, null, null);
++            if (c.moveToFirst()) {
++                mOriginalCount = c.getInt(0);
++            }
++        } finally {
++            if (c != null && !c.isClosed()) {
++                c.close();
++            }
+         }
+     }
+ 
+-- 
+2.5.0
+
+From b424e112cdd51664818a075ba514247c262e2697 Mon Sep 17 00:00:00 2001
+From: arter97 <qkrwngud825@gmail.com>
+Date: Tue, 7 Apr 2015 18:46:33 +0900
+Subject: [PATCH] aapt: Default to 0 compression ratio
+
+Modern devices now has a blazing fast NAND that storage speed is not the bottle-neck when it comes to reading apks.
+
+So use 0 compression ratio for improving speed and memory usage.
+
+if you have a older device and it work bad you can revert this
+Signed-off-by: arter97 <qkrwngud825@gmail.com>
+Signed-off-by: Chet Kener <Cl3Kener@gmail.com>
+Signed-off-by: Akhil Narang <akhilnarang.1999@gmail.com>
+Signed-off-by: klozz <xxx.reptar.rawrr.xxx@gmail.com>
+
+Change-Id: Ia25da68511dd55662bb4bf037cb1029223c17791
+---
+ tools/aapt/Main.cpp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tools/aapt/Main.cpp b/tools/aapt/Main.cpp
+index c6f229d..2ff37bb 100644
+--- a/tools/aapt/Main.cpp
++++ b/tools/aapt/Main.cpp
+@@ -254,8 +254,8 @@ int main(int argc, char* const argv[])
+     int result = 1;    // pessimistically assume an error.
+     int tolerance = 0;
+ 
+-    /* default to compression */
+-    bundle.setCompressionMethod(ZipEntry::kCompressDeflated);
++    /* default to 0 compression */
++    bundle.setCompressionMethod(ZipEntry::kCompressStored);
+ 
+     if (argc < 2) {
+         wantUsage = true;
+-- 
+2.5.0
+

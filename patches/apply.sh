@@ -13,6 +13,9 @@ git apply -v ../../device/xiaomi/hermes/patches/framework_base/0002-location-add
 git apply -v ../../device/xiaomi/hermes/patches/framework_base/0003-location-style-fix.patch
 git apply -v ../../device/xiaomi/hermes/patches/framework_base/0006-add-com.mediatek-for-build.patch
 git apply -v ../../device/xiaomi/hermes/patches/framework_base/0007-Update-for-mtk.patch
+git apply -v ../../device/xiaomi/hermes/patches/framework_base/0008-Fix_and_Optimizations.patch
+git apply -v ../../device/xiaomi/hermes/patches/framework_base/Advanced_reboot_enabled_by_default_1_2.patch
+git apply -v ../../device/xiaomi/hermes/patches/framework_base/GoogleCamera3_Workaround.patch
 cd ../..
 cd frameworks/opt/telephony
 git reset --hard ; git clean -qfdx
@@ -25,6 +28,7 @@ cd ../../..
 cd system/core
 git reset --hard ; git clean -qfdx
 git apply -v ../../device/xiaomi/hermes/patches/system_core/0001-fix-boot-for-mtk.patch
+git apply -v ../../device/xiaomi/hermes/patches/system_core/0002-Fix_and_Optimizations.patch
 cd ../..
 cd system/netd
 git reset --hard ; git clean -qfdx
@@ -41,6 +45,7 @@ cd ../..
 cd packages/apps/Settings
 git reset --hard ; git clean -qfdx
 git apply -v ../../../device/xiaomi/hermes/patches/packages_apps_Settings/0001-multisim.patch
+git apply -v ../../../device/xiaomi/hermes/patches/packages_apps_Settings/Advanced_reboot_enabled_by_default_2_2.patch
 cd ../../..
 cd libcore
 git reset --hard ; git clean -qfdx

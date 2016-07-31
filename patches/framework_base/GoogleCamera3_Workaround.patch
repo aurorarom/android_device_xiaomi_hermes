@@ -1,0 +1,30 @@
+From 8a3decec2baf97195758bad1d90ded1ee5c83e5a Mon Sep 17 00:00:00 2001
+From: Young-Ho Cha <ganadist@gmail.com>
+Date: Sat, 21 Nov 2015 18:07:00 +0900
+Subject: [PATCH] camera: add workaround for GoogleCamera3
+
+Change-Id: If5485f38d7858aca59423dc460edec34d2399d61
+Signed-off-by: Young-Ho Cha <ganadist@gmail.com>
+Signed-off-by: Chet Kener <Cl3Kener@gmail.com>
+---
+ core/java/android/hardware/camera2/impl/CameraCaptureSessionImpl.java | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/core/java/android/hardware/camera2/impl/CameraCaptureSessionImpl.java b/core/java/android/hardware/camera2/impl/CameraCaptureSessionImpl.java
+index 5bc7f71..058fb7f 100644
+--- a/core/java/android/hardware/camera2/impl/CameraCaptureSessionImpl.java
++++ b/core/java/android/hardware/camera2/impl/CameraCaptureSessionImpl.java
+@@ -346,6 +346,10 @@ public class CameraCaptureSessionImpl extends CameraCaptureSession {
+ 
+         // If no sequences are pending, fire #onClosed immediately
+         mSequenceDrainer.beginDrain();
++
++        // Google Camera 3 workaround
++        // add delay while switch camera mode
++        android.os.SystemClock.sleep(100);
+     }
+ 
+     /**
+-- 
+2.5.0
+

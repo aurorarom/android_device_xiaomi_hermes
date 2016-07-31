@@ -1,0 +1,766 @@
+From 79e1326b20b43d532ff282f2a594079497d47f23 Mon Sep 17 00:00:00 2001
+From: Dan Albert <danalbert@google.com>
+Date: Mon, 8 Sep 2014 19:09:41 -0700
+Subject: [PATCH] Fix some clang compilation issues.
+
+Use expected inline behavior with clang.
+
+GCC defaults to -std=gnu90, giving C89 inline semantics with GNU
+extensions. Clang defaults to C99. Explicitly use gnu90.
+
+Mark an unused parameter as __unused.
+
+Fix some incorrect casts.
+
+Change-Id: I05b95585d5e3688eda71769b63b6b8a9237bcaf4
+---
+ fastbootd/vendor_trigger_default.c        | 2 +-
+ libcutils/Android.mk                      | 2 +-
+ libpixelflinger/codeflinger/CodeCache.cpp | 4 ++--
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/fastbootd/vendor_trigger_default.c b/fastbootd/vendor_trigger_default.c
+index 3627024..0bcc99b 100644
+--- a/fastbootd/vendor_trigger_default.c
++++ b/fastbootd/vendor_trigger_default.c
+@@ -52,7 +52,7 @@ int trigger_gpt_layout(struct GPT_content *table) {
+     return 0;
+ }
+ 
+-int trigger_oem_cmd(const char *arg, const char **response) {
++int trigger_oem_cmd(const char *arg, const char **response __unused) {
+     KLOG_DEBUG("fastbootd", "%s: %s", __func__, arg);
+     return 0;
+ }
+diff --git a/libcutils/Android.mk b/libcutils/Android.mk
+index bee2bd7..e050094 100644
+--- a/libcutils/Android.mk
++++ b/libcutils/Android.mk
+@@ -151,7 +151,7 @@ endif
+ 
+ LOCAL_C_INCLUDES := $(libcutils_c_includes)
+ LOCAL_STATIC_LIBRARIES := liblog
+-LOCAL_CFLAGS += $(targetSmpFlag) -Werror
++LOCAL_CFLAGS += $(targetSmpFlag) -Werror -std=gnu90
+ LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
+ include $(BUILD_STATIC_LIBRARY)
+ 
+diff --git a/libpixelflinger/codeflinger/CodeCache.cpp b/libpixelflinger/codeflinger/CodeCache.cpp
+index cfd2b37..d770302 100644
+--- a/libpixelflinger/codeflinger/CodeCache.cpp
++++ b/libpixelflinger/codeflinger/CodeCache.cpp
+@@ -201,8 +201,8 @@ int CodeCache::cache(  const AssemblyKeyBase& keyBase,
+         mCacheInUse += assemblySize;
+         mWhen++;
+         // synchronize caches...
+-        void* base = assembly->base();
+-        void* curr = (uint8_t*)base + assembly->size();
++        char* base = reinterpret_cast<char*>(assembly->base());
++        char* curr = reinterpret_cast<char*>(base + assembly->size());
+         __builtin___clear_cache(base, curr);
+     }
+ 
+-- 
+2.5.0
+
+From 3d70955045a178fb6dac70803541fa9f559f5210 Mon Sep 17 00:00:00 2001
+From: Chih-Hung Hsieh <chh@google.com>
+Date: Mon, 6 Oct 2014 13:27:20 -0700
+Subject: [PATCH] Add -no-integrated-as at local level.
+
+Later we will enable integrated-as as default at the global level.
+
+BUG: 17820427
+Change-Id: I1beed3e75d074d970fa9112ec1c0f0df3d43947a
+---
+ libcutils/Android.mk                                       | 3 +++
+ libpixelflinger/Android.mk                                 | 8 ++++++++
+ libpixelflinger/tests/arch-arm64/assembler/Android.mk      | 3 +++
+ libpixelflinger/tests/arch-arm64/col32cb16blend/Android.mk | 2 ++
+ libpixelflinger/tests/arch-arm64/t32cb16blend/Android.mk   | 2 ++
+ 5 files changed, 18 insertions(+)
+
+diff --git a/libcutils/Android.mk b/libcutils/Android.mk
+index e050094..396db2a 100644
+--- a/libcutils/Android.mk
++++ b/libcutils/Android.mk
+@@ -121,6 +121,9 @@ LOCAL_SRC_FILES := $(commonSources) \
+ LOCAL_SRC_FILES_arm += \
+         arch-arm/memset32.S \
+ 
++# arch-arm/memset32.S does not compile with Clang.
++LOCAL_CLANG_ASFLAGS_arm += -no-integrated-as
++
+ LOCAL_SRC_FILES_arm64 += \
+         arch-arm64/android_memset.S \
+ 
+diff --git a/libpixelflinger/Android.mk b/libpixelflinger/Android.mk
+index 8a427b3..f12e12d 100644
+--- a/libpixelflinger/Android.mk
++++ b/libpixelflinger/Android.mk
+@@ -66,6 +66,10 @@ ifneq ($(BUILD_TINY_ANDROID),true)
+ LOCAL_SHARED_LIBRARIES += libhardware_legacy
+ LOCAL_CFLAGS += -DWITH_LIB_HARDWARE
+ endif
++# t32cb16blend.S does not compile with Clang.
++LOCAL_CLANG_ASFLAGS_arm += -no-integrated-as
++# arch-arm64/col32cb16blend.S does not compile with Clang.
++LOCAL_CLANG_ASFLAGS_arm64 += -no-integrated-as
+ include $(BUILD_SHARED_LIBRARY)
+ 
+ #
+@@ -79,6 +83,10 @@ LOCAL_SRC_FILES_arm := $(PIXELFLINGER_SRC_FILES_arm)
+ LOCAL_SRC_FILES_arm64 := $(PIXELFLINGER_SRC_FILES_arm64)
+ LOCAL_SRC_FILES_mips := $(PIXELFLINGER_SRC_FILES_mips)
+ LOCAL_CFLAGS := $(PIXELFLINGER_CFLAGS)
++# t32cb16blend.S does not compile with Clang.
++LOCAL_CLANG_ASFLAGS_arm += -no-integrated-as
++# arch-arm64/col32cb16blend.S does not compile with Clang.
++LOCAL_CLANG_ASFLAGS_arm64 += -no-integrated-as
+ include $(BUILD_STATIC_LIBRARY)
+ 
+ 
+diff --git a/libpixelflinger/tests/arch-arm64/assembler/Android.mk b/libpixelflinger/tests/arch-arm64/assembler/Android.mk
+index eca36ef..961f323 100644
+--- a/libpixelflinger/tests/arch-arm64/assembler/Android.mk
++++ b/libpixelflinger/tests/arch-arm64/assembler/Android.mk
+@@ -5,6 +5,9 @@ LOCAL_SRC_FILES:= \
+     arm64_assembler_test.cpp\
+     asm_test_jacket.S
+ 
++# asm_test_jacket.S does not compile with Clang.
++LOCAL_CLANG_ASFLAGS_arm64 += -no-integrated-as
++
+ LOCAL_SHARED_LIBRARIES := \
+     libcutils \
+     libpixelflinger
+diff --git a/libpixelflinger/tests/arch-arm64/col32cb16blend/Android.mk b/libpixelflinger/tests/arch-arm64/col32cb16blend/Android.mk
+index 3368eb0..5d69203 100644
+--- a/libpixelflinger/tests/arch-arm64/col32cb16blend/Android.mk
++++ b/libpixelflinger/tests/arch-arm64/col32cb16blend/Android.mk
+@@ -5,6 +5,8 @@ LOCAL_SRC_FILES:= \
+     col32cb16blend_test.c \
+     ../../../arch-arm64/col32cb16blend.S
+ 
++LOCAL_CLANG_ASFLAGS_arm64 += -no-integrated-as
++
+ LOCAL_SHARED_LIBRARIES :=
+ 
+ LOCAL_C_INCLUDES :=
+diff --git a/libpixelflinger/tests/arch-arm64/t32cb16blend/Android.mk b/libpixelflinger/tests/arch-arm64/t32cb16blend/Android.mk
+index 8e5ec5e..2c1379b 100644
+--- a/libpixelflinger/tests/arch-arm64/t32cb16blend/Android.mk
++++ b/libpixelflinger/tests/arch-arm64/t32cb16blend/Android.mk
+@@ -5,6 +5,8 @@ LOCAL_SRC_FILES:= \
+     t32cb16blend_test.c \
+     ../../../arch-arm64/t32cb16blend.S
+ 
++LOCAL_CLANG_ASFLAGS_arm64 += -no-integrated-as
++
+ LOCAL_SHARED_LIBRARIES :=
+ 
+ LOCAL_C_INCLUDES :=
+-- 
+2.5.0
+
+From 63ca8a535cfc379ede22efcce9150824a2092067 Mon Sep 17 00:00:00 2001
+From: Chih-Hung Hsieh <chh@google.com>
+Date: Thu, 23 Oct 2014 15:25:28 -0700
+Subject: [PATCH] Fix type cast error, should be char* not void*.
+
+BUG: 18106835
+Change-Id: Ic0051d5035e5684de0091cd3528d65e1b1e57161
+---
+ libpixelflinger/tests/arch-arm64/assembler/arm64_assembler_test.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libpixelflinger/tests/arch-arm64/assembler/arm64_assembler_test.cpp b/libpixelflinger/tests/arch-arm64/assembler/arm64_assembler_test.cpp
+index 456be58..fd96f7e 100644
+--- a/libpixelflinger/tests/arch-arm64/assembler/arm64_assembler_test.cpp
++++ b/libpixelflinger/tests/arch-arm64/assembler/arm64_assembler_test.cpp
+@@ -409,7 +409,7 @@ void flushcache()
+ {
+     const long base = long(instrMem);
+     const long curr = base + long(instrMemSize);
+-    __builtin___clear_cache((void*)base, (void*)curr);
++    __builtin___clear_cache((char*)base, (char*)curr);
+ }
+ void dataOpTest(dataOpTest_t test, ARMAssemblerInterface *a64asm, uint32_t Rd = 0,
+                 uint32_t Rn = 1, uint32_t Rm = 2, uint32_t Rs = 3)
+-- 
+2.5.0
+
+From 3fbb5fbc6eb3415c7f1c2b8103759c202bfc3e7e Mon Sep 17 00:00:00 2001
+From: Elliott Hughes <enh@google.com>
+Date: Fri, 9 Jan 2015 16:16:53 -0800
+Subject: [PATCH] Linux always has POSIX clocks available.
+
+pixelflinger doesn't have to run on the Mac, but the Condition
+code might.
+
+Change-Id: Ib4e9b4daa6e848ffd5742959427b172d45f08e3c
+---
+ include/utils/Condition.h        | 6 +++---
+ libpixelflinger/pixelflinger.cpp | 8 --------
+ 2 files changed, 3 insertions(+), 11 deletions(-)
+
+diff --git a/include/utils/Condition.h b/include/utils/Condition.h
+index 1c99d1a..db9be59 100644
+--- a/include/utils/Condition.h
++++ b/include/utils/Condition.h
+@@ -113,15 +113,15 @@ inline status_t Condition::waitRelative(Mutex& mutex, nsecs_t reltime) {
+     return -pthread_cond_timedwait_relative_np(&mCond, &mutex.mMutex, &ts);
+ #else // HAVE_PTHREAD_COND_TIMEDWAIT_RELATIVE
+     struct timespec ts;
+-#if defined(HAVE_POSIX_CLOCKS)
++#if defined(__linux__)
+     clock_gettime(CLOCK_REALTIME, &ts);
+-#else // HAVE_POSIX_CLOCKS
++#else // __APPLE__
+     // we don't support the clocks here.
+     struct timeval t;
+     gettimeofday(&t, NULL);
+     ts.tv_sec = t.tv_sec;
+     ts.tv_nsec= t.tv_usec*1000;
+-#endif // HAVE_POSIX_CLOCKS
++#endif
+     ts.tv_sec += reltime/1000000000;
+     ts.tv_nsec+= reltime%1000000000;
+     if (ts.tv_nsec >= 1000000000) {
+diff --git a/libpixelflinger/pixelflinger.cpp b/libpixelflinger/pixelflinger.cpp
+index ea5bc8e..fd449b2 100644
+--- a/libpixelflinger/pixelflinger.cpp
++++ b/libpixelflinger/pixelflinger.cpp
+@@ -727,18 +727,10 @@ void ggl_enable_texture2d(context_t* c, int enable)
+ 
+ int64_t ggl_system_time()
+ {
+-#if defined(HAVE_POSIX_CLOCKS)
+     struct timespec t;
+     t.tv_sec = t.tv_nsec = 0;
+     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
+     return int64_t(t.tv_sec)*1000000000LL + t.tv_nsec;
+-#else
+-    // we don't support the clocks here.
+-    struct timeval t;
+-    t.tv_sec = t.tv_usec = 0;
+-    gettimeofday(&t, NULL);
+-    return int64_t(t.tv_sec)*1000000000LL + int64_t(t.tv_usec)*1000LL;
+-#endif
+ }
+ 
+ // ----------------------------------------------------------------------------
+-- 
+2.5.0
+
+From 21f6bf8ca6e0d34dfce19751d8358baa56079d4c Mon Sep 17 00:00:00 2001
+From: Dan Albert <danalbert@google.com>
+Date: Thu, 20 Nov 2014 10:47:55 -0800
+Subject: [PATCH] Add a pre-C++11 constexpr compatibility macro.
+
+Needed for cases where something should be constexpr if possible, but
+not being constexpr is fine if in pre-C++11 code (such as a const
+static float member variable).
+
+Bug: 18466763
+Change-Id: I635d062575ba2fbc4cbe3a89f730128c404d95e1
+Signed-off-by: arter97 <qkrwngud825@gmail.com>
+---
+ include/utils/Compat.h | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/include/utils/Compat.h b/include/utils/Compat.h
+index fb7748e..eb8fa46 100644
+--- a/include/utils/Compat.h
++++ b/include/utils/Compat.h
+@@ -48,6 +48,17 @@ static inline ssize_t pread64(int fd, void* buf, size_t nbytes, off64_t offset)
+ #endif
+ 
+ /*
++ * Needed for cases where something should be constexpr if possible, but not
++ * being constexpr is fine if in pre-C++11 code (such as a const static float
++ * member variable).
++ */
++#if __cplusplus >= 201103L
++#define CONSTEXPR constexpr
++#else
++#define CONSTEXPR
++#endif
++
++/*
+  * TEMP_FAILURE_RETRY is defined by some, but not all, versions of
+  * <unistd.h>. (Alas, it is not as standard as we'd hoped!) So, if it's
+  * not already defined, then define it here.
+-- 
+2.5.0
+
+From 24c2fa10d414c76542083378de0718f3d551dc4f Mon Sep 17 00:00:00 2001
+From: Eric Miao <emiao@nvidia.com>
+Date: Sun, 12 Apr 2015 16:31:46 -0700
+Subject: [PATCH] libsparse: fix crc chunk parsing in simg_dump.py
+
+Change-Id: Ia5b7cedd88809b0e421a056704d25afa190470b8
+---
+ libsparse/simg_dump.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libsparse/simg_dump.py b/libsparse/simg_dump.py
+index 6ece31d..c70d45f 100755
+--- a/libsparse/simg_dump.py
++++ b/libsparse/simg_dump.py
+@@ -135,7 +135,7 @@ def main():
+           break;
+         else:
+           crc_bin = FH.read(4)
+-          crc = struct.unpack("<I", crc)
++          crc = struct.unpack("<I", crc_bin)
+           print("Unverified CRC32 0x%08X" % (crc))
+       else:
+           print("Unknown chunk type 0x%04X" % (chunk_type), end="")
+-- 
+2.5.0
+
+From 3eea8a2b4e83469e2f3d8608b0dfa085ff4afa13 Mon Sep 17 00:00:00 2001
+From: Adriano Martins <adrianomartins@gmail.com>
+Date: Sat, 23 Jul 2016 02:24:12 -0300
+Subject: [PATCH] Fix
+
+Change-Id: Ic09d20d62954c0392b90fcb05685e5b2b25554c0
+---
+ include/log/log.h            |   9 +
+ liblog/tests/liblog_test.cpp | 395 +++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 404 insertions(+)
+
+diff --git a/include/log/log.h b/include/log/log.h
+index ace12d6..e3b7ec1 100644
+--- a/include/log/log.h
++++ b/include/log/log.h
+@@ -534,6 +534,12 @@ typedef enum {
+ #define android_btWriteLog(tag, type, payload, len) \
+     __android_log_btwrite(tag, type, payload, len)
+ 
++#define android_errorWriteLog(tag, subTag) \
++    __android_log_error_write(tag, subTag, -1, NULL, 0)
++
++#define android_errorWriteWithInfoLog(tag, subTag, uid, data, dataLen) \
++    __android_log_error_write(tag, subTag, uid, data, dataLen)
++
+ // TODO: remove these prototypes and their users
+ #define android_testLog(prio, tag) (1)
+ #define android_writevLog(vec,num) do{}while(0)
+@@ -557,6 +563,9 @@ typedef enum log_id {
+ #define sizeof_log_id_t sizeof(typeof_log_id_t)
+ #define typeof_log_id_t unsigned char
+ 
++int __android_log_error_write(int tag, const char *subTag, int32_t uid, const char *data,
++                              uint32_t dataLen);
++
+ /*
+  * Send a simple string to the log.
+  */
+diff --git a/liblog/tests/liblog_test.cpp b/liblog/tests/liblog_test.cpp
+index 393e2cd..b43a902 100644
+--- a/liblog/tests/liblog_test.cpp
++++ b/liblog/tests/liblog_test.cpp
+@@ -682,3 +682,398 @@ TEST(liblog, filterRule) {
+ 
+     android_log_format_free(p_format);
+ }
++
++static inline int32_t get4LE(const char* src)
++{
++    return src[0] | (src[1] << 8) | (src[2] << 16) | (src[3] << 24);
++}
++
++TEST(liblog, android_errorWriteWithInfoLog__android_logger_list_read__typical) {
++    const int TAG = 123456781;
++    const char SUBTAG[] = "test-subtag";
++    const int UID = -1;
++    const int DATA_LEN = 200;
++    struct logger_list *logger_list;
++
++    pid_t pid = getpid();
++
++    ASSERT_TRUE(NULL != (logger_list = android_logger_list_open(
++        LOG_ID_EVENTS,  O_RDONLY | O_NDELAY, 1000, pid)));
++
++    ASSERT_LT(0, android_errorWriteWithInfoLog(
++            TAG, SUBTAG, UID, max_payload_buf, DATA_LEN));
++
++    sleep(2);
++
++    int count = 0;
++
++    for (;;) {
++        log_msg log_msg;
++        if (android_logger_list_read(logger_list, &log_msg) <= 0) {
++            break;
++        }
++
++        char *eventData = log_msg.msg();
++
++        // Tag
++        int tag = get4LE(eventData);
++        eventData += 4;
++
++        if (tag != TAG) {
++            continue;
++        }
++
++        // List type
++        ASSERT_EQ(EVENT_TYPE_LIST, eventData[0]);
++        eventData++;
++
++        // Number of elements in list
++        ASSERT_EQ(3, eventData[0]);
++        eventData++;
++
++        // Element #1: string type for subtag
++        ASSERT_EQ(EVENT_TYPE_STRING, eventData[0]);
++        eventData++;
++
++        ASSERT_EQ((int) strlen(SUBTAG), get4LE(eventData));
++        eventData +=4;
++
++        if (memcmp(SUBTAG, eventData, strlen(SUBTAG))) {
++            continue;
++        }
++        eventData += strlen(SUBTAG);
++
++        // Element #2: int type for uid
++        ASSERT_EQ(EVENT_TYPE_INT, eventData[0]);
++        eventData++;
++
++        ASSERT_EQ(UID, get4LE(eventData));
++        eventData += 4;
++
++        // Element #3: string type for data
++        ASSERT_EQ(EVENT_TYPE_STRING, eventData[0]);
++        eventData++;
++
++        ASSERT_EQ(DATA_LEN, get4LE(eventData));
++        eventData += 4;
++
++        if (memcmp(max_payload_buf, eventData, DATA_LEN)) {
++            continue;
++        }
++
++        ++count;
++    }
++
++    EXPECT_EQ(1, count);
++
++    android_logger_list_close(logger_list);
++}
++
++TEST(liblog, android_errorWriteWithInfoLog__android_logger_list_read__data_too_large) {
++    const int TAG = 123456782;
++    const char SUBTAG[] = "test-subtag";
++    const int UID = -1;
++    const int DATA_LEN = sizeof(max_payload_buf);
++    struct logger_list *logger_list;
++
++    pid_t pid = getpid();
++
++    ASSERT_TRUE(NULL != (logger_list = android_logger_list_open(
++        LOG_ID_EVENTS,  O_RDONLY | O_NDELAY, 1000, pid)));
++
++    ASSERT_LT(0, android_errorWriteWithInfoLog(
++            TAG, SUBTAG, UID, max_payload_buf, DATA_LEN));
++
++    sleep(2);
++
++    int count = 0;
++
++    for (;;) {
++        log_msg log_msg;
++        if (android_logger_list_read(logger_list, &log_msg) <= 0) {
++            break;
++        }
++
++        char *eventData = log_msg.msg();
++        char *original = eventData;
++
++        // Tag
++        int tag = get4LE(eventData);
++        eventData += 4;
++
++        if (tag != TAG) {
++            continue;
++        }
++
++        // List type
++        ASSERT_EQ(EVENT_TYPE_LIST, eventData[0]);
++        eventData++;
++
++        // Number of elements in list
++        ASSERT_EQ(3, eventData[0]);
++        eventData++;
++
++        // Element #1: string type for subtag
++        ASSERT_EQ(EVENT_TYPE_STRING, eventData[0]);
++        eventData++;
++
++        ASSERT_EQ((int) strlen(SUBTAG), get4LE(eventData));
++        eventData +=4;
++
++        if (memcmp(SUBTAG, eventData, strlen(SUBTAG))) {
++            continue;
++        }
++        eventData += strlen(SUBTAG);
++
++        // Element #2: int type for uid
++        ASSERT_EQ(EVENT_TYPE_INT, eventData[0]);
++        eventData++;
++
++        ASSERT_EQ(UID, get4LE(eventData));
++        eventData += 4;
++
++        // Element #3: string type for data
++        ASSERT_EQ(EVENT_TYPE_STRING, eventData[0]);
++        eventData++;
++
++        size_t dataLen = get4LE(eventData);
++        eventData += 4;
++
++        if (memcmp(max_payload_buf, eventData, dataLen)) {
++            continue;
++        }
++        eventData += dataLen;
++
++        // 4 bytes for the tag, and 512 bytes for the log since the max_payload_buf should be
++        // truncated.
++        ASSERT_EQ(4 + 512, eventData - original);
++
++        ++count;
++    }
++
++    EXPECT_EQ(1, count);
++
++    android_logger_list_close(logger_list);
++}
++
++TEST(liblog, android_errorWriteWithInfoLog__android_logger_list_read__null_data) {
++    const int TAG = 123456783;
++    const char SUBTAG[] = "test-subtag";
++    const int UID = -1;
++    const int DATA_LEN = 200;
++    struct logger_list *logger_list;
++
++    pid_t pid = getpid();
++
++    ASSERT_TRUE(NULL != (logger_list = android_logger_list_open(
++        LOG_ID_EVENTS,  O_RDONLY | O_NDELAY, 1000, pid)));
++
++    ASSERT_GT(0, android_errorWriteWithInfoLog(
++            TAG, SUBTAG, UID, NULL, DATA_LEN));
++
++    sleep(2);
++
++    int count = 0;
++
++    for (;;) {
++        log_msg log_msg;
++        if (android_logger_list_read(logger_list, &log_msg) <= 0) {
++            break;
++        }
++
++        char *eventData = log_msg.msg();
++
++        // Tag
++        int tag = get4LE(eventData);
++        eventData += 4;
++
++        if (tag == TAG) {
++            // This tag should not have been written because the data was null
++            count++;
++            break;
++        }
++    }
++
++    EXPECT_EQ(0, count);
++
++    android_logger_list_close(logger_list);
++}
++
++TEST(liblog, android_errorWriteWithInfoLog__android_logger_list_read__subtag_too_long) {
++    const int TAG = 123456784;
++    const char SUBTAG[] = "abcdefghijklmnopqrstuvwxyz now i know my abc";
++    const int UID = -1;
++    const int DATA_LEN = 200;
++    struct logger_list *logger_list;
++
++    pid_t pid = getpid();
++
++    ASSERT_TRUE(NULL != (logger_list = android_logger_list_open(
++        LOG_ID_EVENTS,  O_RDONLY | O_NDELAY, 1000, pid)));
++
++    ASSERT_LT(0, android_errorWriteWithInfoLog(
++            TAG, SUBTAG, UID, max_payload_buf, DATA_LEN));
++
++    sleep(2);
++
++    int count = 0;
++
++    for (;;) {
++        log_msg log_msg;
++        if (android_logger_list_read(logger_list, &log_msg) <= 0) {
++            break;
++        }
++
++        char *eventData = log_msg.msg();
++
++        // Tag
++        int tag = get4LE(eventData);
++        eventData += 4;
++
++        if (tag != TAG) {
++            continue;
++        }
++
++        // List type
++        ASSERT_EQ(EVENT_TYPE_LIST, eventData[0]);
++        eventData++;
++
++        // Number of elements in list
++        ASSERT_EQ(3, eventData[0]);
++        eventData++;
++
++        // Element #1: string type for subtag
++        ASSERT_EQ(EVENT_TYPE_STRING, eventData[0]);
++        eventData++;
++
++        // The subtag is longer than 32 and should be truncated to that.
++        ASSERT_EQ(32, get4LE(eventData));
++        eventData +=4;
++
++        if (memcmp(SUBTAG, eventData, 32)) {
++            continue;
++        }
++        eventData += 32;
++
++        // Element #2: int type for uid
++        ASSERT_EQ(EVENT_TYPE_INT, eventData[0]);
++        eventData++;
++
++        ASSERT_EQ(UID, get4LE(eventData));
++        eventData += 4;
++
++        // Element #3: string type for data
++        ASSERT_EQ(EVENT_TYPE_STRING, eventData[0]);
++        eventData++;
++
++        ASSERT_EQ(DATA_LEN, get4LE(eventData));
++        eventData += 4;
++
++        if (memcmp(max_payload_buf, eventData, DATA_LEN)) {
++            continue;
++        }
++
++        ++count;
++    }
++
++    EXPECT_EQ(1, count);
++
++    android_logger_list_close(logger_list);
++}
++
++TEST(liblog, android_errorWriteLog__android_logger_list_read__success) {
++    const int TAG = 123456785;
++    const char SUBTAG[] = "test-subtag";
++    struct logger_list *logger_list;
++
++    pid_t pid = getpid();
++
++    ASSERT_TRUE(NULL != (logger_list = android_logger_list_open(
++        LOG_ID_EVENTS,  O_RDONLY | O_NDELAY, 1000, pid)));
++
++    ASSERT_LT(0, android_errorWriteLog(TAG, SUBTAG));
++
++    sleep(2);
++
++    int count = 0;
++
++    for (;;) {
++        log_msg log_msg;
++        if (android_logger_list_read(logger_list, &log_msg) <= 0) {
++            break;
++        }
++
++        char *eventData = log_msg.msg();
++
++        // Tag
++        int tag = get4LE(eventData);
++        eventData += 4;
++
++        if (tag != TAG) {
++            continue;
++        }
++
++        // List type
++        ASSERT_EQ(EVENT_TYPE_LIST, eventData[0]);
++        eventData++;
++
++        // Number of elements in list
++        ASSERT_EQ(3, eventData[0]);
++        eventData++;
++
++        // Element #1: string type for subtag
++        ASSERT_EQ(EVENT_TYPE_STRING, eventData[0]);
++        eventData++;
++
++        ASSERT_EQ((int) strlen(SUBTAG), get4LE(eventData));
++        eventData +=4;
++
++        if (memcmp(SUBTAG, eventData, strlen(SUBTAG))) {
++            continue;
++        }
++        ++count;
++    }
++
++    EXPECT_EQ(1, count);
++
++    android_logger_list_close(logger_list);
++}
++
++TEST(liblog, android_errorWriteLog__android_logger_list_read__null_subtag) {
++    const int TAG = 123456786;
++    struct logger_list *logger_list;
++
++    pid_t pid = getpid();
++
++    ASSERT_TRUE(NULL != (logger_list = android_logger_list_open(
++        LOG_ID_EVENTS,  O_RDONLY | O_NDELAY, 1000, pid)));
++
++    ASSERT_GT(0, android_errorWriteLog(TAG, NULL));
++
++    sleep(2);
++
++    int count = 0;
++
++    for (;;) {
++        log_msg log_msg;
++        if (android_logger_list_read(logger_list, &log_msg) <= 0) {
++            break;
++        }
++
++        char *eventData = log_msg.msg();
++
++        // Tag
++        int tag = get4LE(eventData);
++        eventData += 4;
++
++        if (tag == TAG) {
++            // This tag should not have been written because the data was null
++            count++;
++            break;
++        }
++    }
++
++    EXPECT_EQ(0, count);
++
++    android_logger_list_close(logger_list);
++}
+-- 
+2.5.0
+
