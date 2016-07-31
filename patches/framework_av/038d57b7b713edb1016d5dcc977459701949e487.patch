@@ -1,4 +1,101 @@
-From 038d57b7b713edb1016d5dcc977459701949e487 Mon Sep 17 00:00:00 2001
+From d0109232312911bbd1626d993ebed56db02b3c88 Mon Sep 17 00:00:00 2001
+From: Bernhard Rosenkraenzer <Bernhard.Rosenkranzer@linaro.org>
+Date: Fri, 24 Aug 2012 21:17:22 +0200
+Subject: [PATCH] av: Fix build in ISO C++11 mode
+
+Change-Id: I461d8ce5b24afedee245a6441b600df286c76b63
+Signed-off-by: Bernhard Rosenkraenzer <Bernhard.Rosenkranzer@linaro.org>
+Signed-off-by: Chet Kener <Cl3Kener@gmail.com>
+
+Conflicts:
+	services/audioflinger/AudioResampler.h
+
+Signed-off-by: Chet Kener <Cl3Kener@gmail.com>
+---
+ services/audioflinger/AudioResampler.h | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/services/audioflinger/AudioResampler.h b/services/audioflinger/AudioResampler.h
+index 54130c4..b980f20 100644
+--- a/services/audioflinger/AudioResampler.h
++++ b/services/audioflinger/AudioResampler.h
+@@ -24,6 +24,10 @@
+ #include <media/AudioBufferProvider.h>
+ #include <system/audio.h>
+ 
++#if __cplusplus < 201103L && !defined(__GXX_EXPERIMENTAL_CXX0X__) && !defined(constexpr)
++#define constexpr const
++#endif
++
+ namespace android {
+ // ----------------------------------------------------------------------------
+ 
+@@ -84,13 +88,13 @@ public:
+ 
+ protected:
+     // number of bits for phase fraction - 30 bits allows nearly 2x downsampling
+-    static const int kNumPhaseBits = 30;
++    static constexpr int kNumPhaseBits = 30;
+ 
+     // phase mask for fraction
+-    static const uint32_t kPhaseMask = (1LU<<kNumPhaseBits)-1;
++    static constexpr uint32_t kPhaseMask = (1LU<<kNumPhaseBits)-1;
+ 
+     // multiplier to calculate fixed point phase increment
+-    static const double kPhaseMultiplier;
++    static constexpr double kPhaseMultiplier;
+ 
+     AudioResampler(int inChannelCount, int32_t sampleRate, src_quality quality);
+ 
+-- 
+2.5.0
+
+From be6514f9f65263e2746f03b8b687167f43c119d1 Mon Sep 17 00:00:00 2001
+From: Amit Pundir <amit.pundir@linaro.org>
+Date: Sat, 27 Jul 2013 01:42:30 +0530
+Subject: [PATCH] libstagefright: audioflinger: use no strict aliasing for now
+
+Change-Id: Ie16c84cd63418800953ee8105b0dc338d87e8aa5
+Signed-off-by: Amit Pundir <amit.pundir@linaro.org>
+Signed-off-by: Chet Kener <Cl3Kener@gmail.com>
+---
+ media/libstagefright/Android.mk  | 2 ++
+ services/audioflinger/Android.mk | 5 +++++
+ 2 files changed, 7 insertions(+)
+
+diff --git a/media/libstagefright/Android.mk b/media/libstagefright/Android.mk
+index 4b4a8e9..4ce430c 100644
+--- a/media/libstagefright/Android.mk
++++ b/media/libstagefright/Android.mk
+@@ -100,6 +100,8 @@ LOCAL_C_INCLUDES:= \
+         $(TOP)/external/icu/icu4c/source/common \
+         $(TOP)/external/icu/icu4c/source/i18n \
+ 
++LOCAL_CFLAGS += -fno-strict-aliasing
++
+ LOCAL_SHARED_LIBRARIES := \
+         libbinder \
+         libcamera_client \
+diff --git a/services/audioflinger/Android.mk b/services/audioflinger/Android.mk
+index 4eb13a3..d3ccbb2 100644
+--- a/services/audioflinger/Android.mk
++++ b/services/audioflinger/Android.mk
+@@ -59,6 +59,11 @@ LOCAL_SRC_FILES:=               \
+ 
+ LOCAL_SRC_FILES += StateQueue.cpp
+ 
++# uncomment for debugging timing problems related to StateQueue::push()
++LOCAL_CFLAGS += -DSTATE_QUEUE_DUMP
++
++LOCAL_CFLAGS += -fno-strict-aliasing
++
+ LOCAL_C_INCLUDES := \
+     $(TOPDIR)frameworks/av/services/audiopolicy \
+     $(call include-path-for, audio-effects) \
+-- 
+2.5.0
+
+From e909fd75047fa4f303f3b6d25959f29572f03403 Mon Sep 17 00:00:00 2001
 From: Kyle Repinski <repinski23@gmail.com>
 Date: Sun, 19 Apr 2015 01:03:46 -0500
 Subject: [PATCH] Fix compiler issues uncovered at higher optimization levels.
@@ -86,3 +183,707 @@ index 01f3412..db89698 100644
          TO* temp __unused, TA* aux)
  {
      ALOGVV("track__NoResample\n");
+-- 
+2.5.0
+
+From 35391bc894ab4e858ffd46fe688197c37dfdf7a8 Mon Sep 17 00:00:00 2001
+From: "donghyub.cho" <donghyub.cho@lge.com>
+Date: Wed, 21 Jan 2015 13:48:35 +0900
+Subject: [PATCH] Fix bugs regarding looping play issue with sharedBuffer
+
+1. Looping play error.
+Looping SoundPool play with FastMixer sometimes does not work depends on audio frameCount.
+
+2. When a audio is played with SoundPool, AudioTrack is created with the "AUDIO_OUTPUT_FLAG_FAST" flag.
+If all the conditions such as callback transfer mode, mSharedBuffer, and sampling rate, for FastMixer usage are satisfied, then FastMixer is ready for working.
+For instance, suppose that a audio frameCount is set as "6721" before StaticAudioTrackClientProxy class instance is created,[AudioTrack::createTrack_l()]
+on playing, the initial value("6721") of "frameReady" is getting to be decreased by the value("240") of "current->mFrameCount"[FastMixer::onWork()]
+After all, the value of "frameReady" is getting to be decreased, and the remaing value of "frameReady" getting to be "1".
+
+3. On this moment, "underruns.mBitFields.mMostRecent" becames to be "UNDERRUN_PARTIAL"[FastMixer::onWork()],
+and the value of "recentUnderruns" becames to be "1"[AudioFlinger::MixerThread::prepareTracks_l].
+If the value of "recentUnderruns" is "1", then even though the vale of "track->mState" is "TrackBase::ACTIVE", "presentationComplete()" API will be called.
+Therefore, looping play becames suddenly stop.
+
+4. To prevent playing stop in this case, the routine of checking "recentEmpty" value is added.
+
+Change-Id: I716aa987205021662da336c12a69407caacb99a5
+Signed-off-by: donghyub cho <donghyub.cho@lge.com>
+---
+ services/audioflinger/Threads.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index b8e27e2..0f3918f 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -3594,6 +3594,12 @@ AudioFlinger::PlaybackThread::mixer_state AudioFlinger::MixerThread::prepareTrac
+                     isActive = false;
+                     break;
+                 }
++                else {
++                   if (recentEmpty == 0) {
++                   // no, then ignore the partial underruns as they are allowed indefinitely
++                      break;
++                   }
++                }
+                 // fall through
+             case TrackBase::STOPPING_2:
+             case TrackBase::PAUSED:
+-- 
+2.5.0
+
+From b3fc246a0236f81a1414cc76b8f90c64e5a480a4 Mon Sep 17 00:00:00 2001
+From: "dk.han" <dk.han@lge.com>
+Date: Tue, 20 Jan 2015 11:00:42 +0900
+Subject: [PATCH] Fix bugs don't remove track of DirectOutputThread
+
+Don't remove track of DirectOutputThread by a wrong state control for track stop processor.
+Change a state to STOPPING_1 in Track::stop() function, but check STOPPING_2 state in DirectOutput::prepareTracks_l
+function.
+So the Track is doesn't add tracksToRemove vector.
+
+I thing, change check condition from isStopping_2() to isStopping() function in DirectOutput::prepareTracks_l() function.
+
+Change-Id: I68c4346f02ef1b8635a2180c2a0b3089ce2af955
+Signed-off-by: DongKyoon Han <dk.han@lge.com>
+---
+ services/audioflinger/Threads.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/audioflinger/Threads.cpp b/services/audioflinger/Threads.cpp
+index 0f3918f..498565a 100644
+--- a/services/audioflinger/Threads.cpp
++++ b/services/audioflinger/Threads.cpp
+@@ -4466,7 +4466,7 @@ AudioFlinger::PlaybackThread::mixer_state AudioFlinger::DirectOutputThread::prep
+         }
+ 
+         if ((track->framesReady() >= minFrames) && track->isReady() && !track->isPaused() &&
+-                !track->isStopping_2() && !track->isStopped())
++                !track->isStopping() && !track->isStopped())
+         {
+             ALOGVV("track %d s=%08x [OK]", track->name(), cblk->mServer);
+ 
+-- 
+2.5.0
+
+From 87bd2b5b873dbad0b4a5afdcb0fef7ab094cd5bb Mon Sep 17 00:00:00 2001
+From: Bernhard Rosenkraenzer <Bernhard.Rosenkranzer@linaro.org>
+Date: Fri, 24 Aug 2012 21:03:45 +0200
+Subject: [PATCH] av: More ISO C++ 11 fixes
+
+Change-Id: I84bfab66d561cb0ded6e312b8cfe02e5fe2a182f
+Signed-off-by: Bernhard Rosenkraenzer <Bernhard.Rosenkranzer@linaro.org>
+Signed-off-by: Chet Kener <Cl3Kener@gmail.com>
+---
+ cmds/stagefright/SineSource.h | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/cmds/stagefright/SineSource.h b/cmds/stagefright/SineSource.h
+index 76ab669..41d3bf3 100644
+--- a/cmds/stagefright/SineSource.h
++++ b/cmds/stagefright/SineSource.h
+@@ -4,6 +4,10 @@
+ 
+ #include <media/stagefright/MediaSource.h>
+ 
++#if __cplusplus < 201103L && !defined(__GXX_EXPERIMENTAL_CXX0X__) && !defined(constexpr)
++#define constexpr const
++#endif
++
+ namespace android {
+ 
+ struct MediaBufferGroup;
+@@ -24,7 +28,7 @@ protected:
+ 
+ private:
+     enum { kBufferSize = 8192 };
+-    static const double kFrequency = 500.0;
++    static constexpr double kFrequency = 500.0;
+ 
+     bool mStarted;
+     int32_t mSampleRate;
+-- 
+2.5.0
+
+From 445279f484d4e78e39642852cde6274f239127ff Mon Sep 17 00:00:00 2001
+From: Adriano Martins <adrianomartins@gmail.com>
+Date: Mon, 25 Jan 2016 03:10:11 -0200
+Subject: [PATCH] C++11 compatibility.
+
+ * Fix string literal concatenation to not be interpreted as UD
+   literals.
+ * Add constexpr compatibility for non-integral static members.
+ * Use __typeof__ instead of typeof (should become decltype once this
+   actually becomes C++11).
+ * Add an appropriate cast for atomic_uintptr_t, since moving to C++11
+   means moving from <stdatomic.h> to <atomic>, which has better
+   typechecking (hooray for not macros!).
+
+Change-Id: I5f5729569927ab3f9e0ac66e41eb9ae7618077cd
+---
+ cmds/stagefright/SineSource.h                              |  7 ++-----
+ include/media/ToneGenerator.h                              |  8 +++++---
+ media/mediaserver/Android.mk                               |  1 +
+ services/audioflinger/Android.mk                           |  2 ++
+ services/audioflinger/AudioMixer.cpp                       |  2 +-
+ services/audioflinger/AudioMixer.h                         |  7 ++++++-
+ services/audioflinger/AudioResampler.h                     | 14 ++++++--------
+ services/audioflinger/AudioResamplerFirGen.h               | 12 +++++++-----
+ services/audioflinger/StateQueue.cpp                       |  2 +-
+ services/camera/libcameraservice/Android.mk                |  1 +
+ services/camera/libcameraservice/api1/client2/Parameters.h |  6 ++++--
+ .../libcameraservice/device1/CameraHardwareInterface.h     |  2 +-
+ 12 files changed, 37 insertions(+), 27 deletions(-)
+
+diff --git a/cmds/stagefright/SineSource.h b/cmds/stagefright/SineSource.h
+index 41d3bf3..234e880 100644
+--- a/cmds/stagefright/SineSource.h
++++ b/cmds/stagefright/SineSource.h
+@@ -3,10 +3,7 @@
+ #define SINE_SOURCE_H_
+ 
+ #include <media/stagefright/MediaSource.h>
+-
+-#if __cplusplus < 201103L && !defined(__GXX_EXPERIMENTAL_CXX0X__) && !defined(constexpr)
+-#define constexpr const
+-#endif
++#include <utils/Compat.h>
+ 
+ namespace android {
+ 
+@@ -28,7 +25,7 @@ protected:
+ 
+ private:
+     enum { kBufferSize = 8192 };
+-    static constexpr double kFrequency = 500.0;
++    static const CONSTEXPR double kFrequency = 500.0;
+ 
+     bool mStarted;
+     int32_t mSampleRate;
+diff --git a/include/media/ToneGenerator.h b/include/media/ToneGenerator.h
+index 36c5b43..2f5a711 100644
+--- a/include/media/ToneGenerator.h
++++ b/include/media/ToneGenerator.h
+@@ -17,12 +17,14 @@
+ #ifndef ANDROID_TONEGENERATOR_H_
+ #define ANDROID_TONEGENERATOR_H_
+ 
+-#include <utils/RefBase.h>
+-#include <utils/KeyedVector.h>
+-#include <utils/threads.h>
+ #include <media/AudioSystem.h>
+ #include <media/AudioTrack.h>
+ 
++#include <utils/Compat.h>
++#include <utils/KeyedVector.h>
++#include <utils/RefBase.h>
++#include <utils/threads.h>
++
+ namespace android {
+ 
+ class ToneGenerator {
+diff --git a/media/mediaserver/Android.mk b/media/mediaserver/Android.mk
+index 732e77f..cfe2fae 100644
+--- a/media/mediaserver/Android.mk
++++ b/media/mediaserver/Android.mk
+@@ -52,5 +52,6 @@ endif
+ 
+ LOCAL_MODULE:= mediaserver
+ LOCAL_32_BIT_ONLY := true
++#LOCAL_CFLAGS += -std=gnu++11
+ 
+ include $(BUILD_EXECUTABLE)
+diff --git a/services/audioflinger/Android.mk b/services/audioflinger/Android.mk
+index d3ccbb2..6ad961b 100644
+--- a/services/audioflinger/Android.mk
++++ b/services/audioflinger/Android.mk
+@@ -98,6 +98,7 @@ endif
+ endif
+ #QTI Resampler
+ 
++LOCAL_CFLAGS += -std=gnu++11
+ LOCAL_MODULE:= libaudioflinger
+ LOCAL_32_BIT_ONLY := true
+ 
+@@ -200,6 +201,7 @@ endif
+ #QTI Resampler
+ 
+ LOCAL_MODULE := libaudioresampler
++LOCAL_CFLAGS += -std=gnu++11
+ 
+ include $(BUILD_SHARED_LIBRARY)
+ 
+diff --git a/services/audioflinger/AudioMixer.cpp b/services/audioflinger/AudioMixer.cpp
+index db89698..a34c1e0 100644
+--- a/services/audioflinger/AudioMixer.cpp
++++ b/services/audioflinger/AudioMixer.cpp
+@@ -1910,7 +1910,7 @@ int64_t AudioMixer::calculateOutputPTS(const track_t& t, int64_t basePTS,
+  * Perhaps just stick with a single for loop.
+  */
+ 
+-// Needs to derive a compile time constant (constexpr).  Could be targeted to go
++// Needs to derive a compile time constant (CONSTEXPR).  Could be targeted to go
+ // to a MONOVOL mixtype based on MAX_NUM_VOLUMES, but that's an unnecessary complication.
+ #define MIXTYPE_MONOVOL(mixtype) (mixtype == MIXTYPE_MULTI ? MIXTYPE_MULTI_MONOVOL : \
+         mixtype == MIXTYPE_MULTI_SAVEONLY ? MIXTYPE_MULTI_SAVEONLY_MONOVOL : mixtype)
+diff --git a/services/audioflinger/AudioMixer.h b/services/audioflinger/AudioMixer.h
+index 1fa6846..fff9910 100644
+--- a/services/audioflinger/AudioMixer.h
++++ b/services/audioflinger/AudioMixer.h
+@@ -21,6 +21,11 @@
+ #include <stdint.h>
+ #include <sys/types.h>
+ 
++#include <hardware/audio_effect.h>
++#include <media/AudioBufferProvider.h>
++#include <media/nbaio/NBLog.h>
++#include <system/audio.h>
++#include <utils/Compat.h>
+ #include <utils/threads.h>
+ 
+ #include <media/AudioBufferProvider.h>
+@@ -61,7 +66,7 @@ public:
+     static const uint32_t MAX_NUM_CHANNELS_TO_DOWNMIX = AUDIO_CHANNEL_COUNT_MAX;
+ 
+     static const uint16_t UNITY_GAIN_INT = 0x1000;
+-    static const float    UNITY_GAIN_FLOAT = 1.0f;
++    static const CONSTEXPR float UNITY_GAIN_FLOAT = 1.0f;
+ 
+     enum { // names
+ 
+diff --git a/services/audioflinger/AudioResampler.h b/services/audioflinger/AudioResampler.h
+index b980f20..befaad7 100644
+--- a/services/audioflinger/AudioResampler.h
++++ b/services/audioflinger/AudioResampler.h
+@@ -19,15 +19,13 @@
+ 
+ #include <stdint.h>
+ #include <sys/types.h>
++
+ #include <cutils/compiler.h>
++#include <utils/Compat.h>
+ 
+ #include <media/AudioBufferProvider.h>
+ #include <system/audio.h>
+ 
+-#if __cplusplus < 201103L && !defined(__GXX_EXPERIMENTAL_CXX0X__) && !defined(constexpr)
+-#define constexpr const
+-#endif
+-
+ namespace android {
+ // ----------------------------------------------------------------------------
+ 
+@@ -54,7 +52,7 @@ public:
+ #endif
+     };
+ 
+-    static const float UNITY_GAIN_FLOAT = 1.0f;
++    static const CONSTEXPR float UNITY_GAIN_FLOAT = 1.0f;
+ 
+     static AudioResampler* create(audio_format_t format, int inChannelCount,
+             int32_t sampleRate, src_quality quality=DEFAULT_QUALITY);
+@@ -88,13 +86,13 @@ public:
+ 
+ protected:
+     // number of bits for phase fraction - 30 bits allows nearly 2x downsampling
+-    static constexpr int kNumPhaseBits = 30;
++    static const int kNumPhaseBits = 30;
+ 
+     // phase mask for fraction
+-    static constexpr uint32_t kPhaseMask = (1LU<<kNumPhaseBits)-1;
++    static const uint32_t kPhaseMask = (1LU<<kNumPhaseBits)-1;
+ 
+     // multiplier to calculate fixed point phase increment
+-    static constexpr double kPhaseMultiplier;
++    static const double kPhaseMultiplier;
+ 
+     AudioResampler(int inChannelCount, int32_t sampleRate, src_quality quality);
+ 
+diff --git a/services/audioflinger/AudioResamplerFirGen.h b/services/audioflinger/AudioResamplerFirGen.h
+index d024b2f..369536e 100644
+--- a/services/audioflinger/AudioResamplerFirGen.h
++++ b/services/audioflinger/AudioResamplerFirGen.h
+@@ -17,6 +17,8 @@
+ #ifndef ANDROID_AUDIO_RESAMPLER_FIR_GEN_H
+ #define ANDROID_AUDIO_RESAMPLER_FIR_GEN_H
+ 
++#include "utils/Compat.h"
++
+ namespace android {
+ 
+ /*
+@@ -178,7 +180,7 @@ static inline int64_t toint(double x, int64_t maxval) {
+  * I0ATerm<> to the precision of the compiler.  The series can be expanded
+  * to any precision needed, but currently set around 24b precision.
+  *
+- * We use a bit of template math here, constexpr would probably be
++ * We use a bit of template math here, CONSTEXPR would probably be
+  * more appropriate for a C++11 compiler.
+  *
+  * For the intermediate range 3.75 < x < 15, we use minimax polynomial fit.
+@@ -187,22 +189,22 @@ static inline int64_t toint(double x, int64_t maxval) {
+ 
+ template <int N>
+ struct I0Term {
+-    static const double value = I0Term<N-1>::value / (4. * N * N);
++    static const CONSTEXPR double value = I0Term<N-1>::value / (4. * N * N);
+ };
+ 
+ template <>
+ struct I0Term<0> {
+-    static const double value = 1.;
++    static const CONSTEXPR double value = 1.;
+ };
+ 
+ template <int N>
+ struct I0ATerm {
+-    static const double value = I0ATerm<N-1>::value * (2.*N-1.) * (2.*N-1.) / (8. * N);
++    static const CONSTEXPR double value = I0ATerm<N-1>::value * (2.*N-1.) * (2.*N-1.) / (8. * N);
+ };
+ 
+ template <>
+ struct I0ATerm<0> { // 1/sqrt(2*PI);
+-    static const double value = 0.398942280401432677939946059934381868475858631164934657665925;
++    static const CONSTEXPR double value = 0.398942280401432677939946059934381868475858631164934657665925;
+ };
+ 
+ #if USE_HORNERS_METHOD
+diff --git a/services/audioflinger/StateQueue.cpp b/services/audioflinger/StateQueue.cpp
+index 40d7bcd..9d4188f 100644
+--- a/services/audioflinger/StateQueue.cpp
++++ b/services/audioflinger/StateQueue.cpp
+@@ -48,7 +48,7 @@ template<typename T> StateQueue<T>::StateQueue() :
+     , mObserverDump(&mObserverDummyDump), mMutatorDump(&mMutatorDummyDump)
+ #endif
+ {
+-    atomic_init(&mNext, 0);
++    atomic_init(&mNext, static_cast<uintptr_t>(0));
+ }
+ 
+ template<typename T> StateQueue<T>::~StateQueue()
+diff --git a/services/camera/libcameraservice/Android.mk b/services/camera/libcameraservice/Android.mk
+index db179fb..9a39026 100644
+--- a/services/camera/libcameraservice/Android.mk
++++ b/services/camera/libcameraservice/Android.mk
+@@ -79,6 +79,7 @@ LOCAL_C_INCLUDES += \
+ 
+ 
+ LOCAL_CFLAGS += -Wall -Wextra
++#LOCAL_CFLAGS += -std=gnu++11
+ 
+ ifeq ($(BOARD_NEEDS_MEMORYHEAPION),true)
+     LOCAL_CFLAGS += -DUSE_MEMORY_HEAP_ION
+diff --git a/services/camera/libcameraservice/api1/client2/Parameters.h b/services/camera/libcameraservice/api1/client2/Parameters.h
+index 7e5be84..e628a7e 100644
+--- a/services/camera/libcameraservice/api1/client2/Parameters.h
++++ b/services/camera/libcameraservice/api1/client2/Parameters.h
+@@ -19,11 +19,13 @@
+ 
+ #include <system/graphics.h>
+ 
++#include <utils/Compat.h>
+ #include <utils/Errors.h>
++#include <utils/KeyedVector.h>
+ #include <utils/Mutex.h>
+ #include <utils/String8.h>
+ #include <utils/Vector.h>
+-#include <utils/KeyedVector.h>
++
+ #include <camera/CameraParameters.h>
+ #include <camera/CameraParameters2.h>
+ #include <camera/CameraMetadata.h>
+@@ -187,7 +189,7 @@ struct Parameters {
+     static const int MAX_INITIAL_PREVIEW_WIDTH = 1920;
+     static const int MAX_INITIAL_PREVIEW_HEIGHT = 1080;
+     // Aspect ratio tolerance
+-    static const float ASPECT_RATIO_TOLERANCE = 0.001;
++    static const CONSTEXPR float ASPECT_RATIO_TOLERANCE = 0.001;
+ 
+     // Full static camera info, object owned by someone else, such as
+     // Camera2Device.
+diff --git a/services/camera/libcameraservice/device1/CameraHardwareInterface.h b/services/camera/libcameraservice/device1/CameraHardwareInterface.h
+index 411a9c7..d39098a 100644
+--- a/services/camera/libcameraservice/device1/CameraHardwareInterface.h
++++ b/services/camera/libcameraservice/device1/CameraHardwareInterface.h
+@@ -628,7 +628,7 @@ private:
+ 
+ #ifndef container_of
+ #define container_of(ptr, type, member) ({                      \
+-        const typeof(((type *) 0)->member) *__mptr = (ptr);     \
++        const __typeof__(((type *) 0)->member) *__mptr = (ptr);     \
+         (type *) ((char *) __mptr - (char *)(&((type *)0)->member)); })
+ #endif
+ 
+-- 
+2.5.0
+
+From 43b13610b06157b7b88feecbb47b013be87a0f18 Mon Sep 17 00:00:00 2001
+From: Diogo Ferreira <defer@cyngn.com>
+Date: Wed, 23 Mar 2016 17:45:20 +0000
+Subject: [PATCH] omx: softcodecs: Support HAL_PIXEL_FORMAT_RGBX_8888
+
+Adds support for the HAL_PIXEL_FORMAT_RGBX_8888 format used by
+mediatek's hardware.
+
+Fixes several CTS tests where interaction between hardware and software
+encoders and decoders is tested.
+
+Change-Id: Ie3267c7d34706c49ad415ebc04ad05f2f2ef3506
+---
+ media/libstagefright/omx/SoftVideoEncoderOMXComponent.cpp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/media/libstagefright/omx/SoftVideoEncoderOMXComponent.cpp b/media/libstagefright/omx/SoftVideoEncoderOMXComponent.cpp
+index 375d312..fea04b9 100644
+--- a/media/libstagefright/omx/SoftVideoEncoderOMXComponent.cpp
++++ b/media/libstagefright/omx/SoftVideoEncoderOMXComponent.cpp
+@@ -610,6 +610,9 @@ const uint8_t *SoftVideoEncoderOMXComponent::extractGraphicBuffer(
+             break;
+         case HAL_PIXEL_FORMAT_RGBA_8888:
+         case HAL_PIXEL_FORMAT_BGRA_8888:
++#ifdef MTK_HARDWARE
++        case HAL_PIXEL_FORMAT_RGBX_8888:
++#endif
+             ConvertRGB32ToPlanar(
+                     dst, dstStride, dstVStride,
+                     (const uint8_t *)bits, width, height, srcStride,
+-- 
+2.5.0
+
+From f6ec3337207f801e58c041b874e90286cf76f568 Mon Sep 17 00:00:00 2001
+From: Wang Xuerui <idontknw.wang@gmail.com>
+Date: Sat, 2 Jul 2016 00:28:41 +0800
+Subject: [PATCH] IOMX: fix unnoticed ABI breakage inside the framework
+
+Change-Id: If57bb81080d72f07cb129edaa9eebfa535124a31
+---
+ media/libmedia/IOMX.cpp | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/media/libmedia/IOMX.cpp b/media/libmedia/IOMX.cpp
+index 75b99a6..bf81393 100644
+--- a/media/libmedia/IOMX.cpp
++++ b/media/libmedia/IOMX.cpp
+@@ -143,7 +143,11 @@ public:
+         data.writeInterfaceToken(IOMX::getInterfaceDescriptor());
+         data.writeInt32((int32_t)node);
+         data.writeInt32(index);
++#ifdef USE_LEGACY_MTK_AV_BLOB
++        data.writeInt32(size);
++#else
+         data.writeInt64(size);
++#endif
+         data.write(params, size);
+         remote()->transact(GET_PARAMETER, data, &reply);
+ 
+@@ -164,7 +168,11 @@ public:
+         data.writeInterfaceToken(IOMX::getInterfaceDescriptor());
+         data.writeInt32((int32_t)node);
+         data.writeInt32(index);
++#ifdef USE_LEGACY_MTK_AV_BLOB
++        data.writeInt32(size);
++#else
+         data.writeInt64(size);
++#endif
+         data.write(params, size);
+         remote()->transact(SET_PARAMETER, data, &reply);
+ 
+@@ -178,7 +186,11 @@ public:
+         data.writeInterfaceToken(IOMX::getInterfaceDescriptor());
+         data.writeInt32((int32_t)node);
+         data.writeInt32(index);
++#ifdef USE_LEGACY_MTK_AV_BLOB
++        data.writeInt32(size);
++#else
+         data.writeInt64(size);
++#endif
+         data.write(params, size);
+         remote()->transact(GET_CONFIG, data, &reply);
+ 
+@@ -199,7 +211,11 @@ public:
+         data.writeInterfaceToken(IOMX::getInterfaceDescriptor());
+         data.writeInt32((int32_t)node);
+         data.writeInt32(index);
++#ifdef USE_LEGACY_MTK_AV_BLOB
++        data.writeInt32(size);
++#else
+         data.writeInt64(size);
++#endif
+         data.write(params, size);
+         remote()->transact(SET_CONFIG, data, &reply);
+ 
+@@ -506,7 +522,11 @@ public:
+         data.writeInterfaceToken(IOMX::getInterfaceDescriptor());
+         data.writeInt32((int32_t)node);
+         data.writeInt32(port_index);
++#ifdef USE_LEGACY_MTK_AV_BLOB
++        data.writeInt32(size);
++#else
+         data.writeInt64(size);
++#endif
+         data.write(optionData, size);
+         data.writeInt32(type);
+         remote()->transact(SET_INTERNAL_OPTION, data, &reply);
+-- 
+2.5.0
+
+From 8db2386ddae78abc7a7204a8e48fc1a474b28ed0 Mon Sep 17 00:00:00 2001
+From: Wang Xuerui <idontknw.wang@gmail.com>
+Date: Thu, 23 Jun 2016 00:09:19 +0800
+Subject: [PATCH] IOMX: be compatible with legacy MTK blobs
+
+Change-Id: I4af5631ff070102d90b0cd7916f6035730c252ea
+---
+ media/libmedia/Android.mk | 4 ++++
+ media/libmedia/IOMX.cpp   | 4 ++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/media/libmedia/Android.mk b/media/libmedia/Android.mk
+index d6b4e9d..00b420f 100644
+--- a/media/libmedia/Android.mk
++++ b/media/libmedia/Android.mk
+@@ -132,6 +132,10 @@ LOCAL_SRC_FILES += \
+ 
+ # StrongPointer.h
+ LOCAL_C_INCLUDES += $(TOP)/frameworks/rs/server
++
++ifeq ($(BOARD_USES_LEGACY_MTK_AV_BLOB),true)
++LOCAL_CFLAGS += -DUSE_LEGACY_MTK_AV_BLOB
++endif
+ endif
+ 
+ include $(BUILD_SHARED_LIBRARY)
+diff --git a/media/libmedia/IOMX.cpp b/media/libmedia/IOMX.cpp
+index bf81393..6e82b79 100644
+--- a/media/libmedia/IOMX.cpp
++++ b/media/libmedia/IOMX.cpp
+@@ -638,7 +638,11 @@ status_t BnOMX::onTransact(
+             node_id node = (node_id)data.readInt32();
+             OMX_INDEXTYPE index = static_cast<OMX_INDEXTYPE>(data.readInt32());
+ 
++#ifdef USE_LEGACY_MTK_AV_BLOB
++            size_t size = data.readInt32();
++#else
+             size_t size = data.readInt64();
++#endif
+ 
+             status_t err = NOT_ENOUGH_DATA;
+             void *params = NULL;
+-- 
+2.5.0
+
+From f382a87c705ec53c78855b6f7b572c03bbf7ce6f Mon Sep 17 00:00:00 2001
+From: Wang Xuerui <idontknw.wang@gmail.com>
+Date: Thu, 24 Mar 2016 19:51:30 +0800
+Subject: [PATCH] CameraService: guard against nullable ANativeWindow pointers
+
+Change-Id: Ia6d6ef00040237ecc6b0eb079d254bcf260c0e65
+---
+ .../device1/CameraHardwareInterface.h              | 36 ++++++++++++++++++++++
+ 1 file changed, 36 insertions(+)
+
+diff --git a/services/camera/libcameraservice/device1/CameraHardwareInterface.h b/services/camera/libcameraservice/device1/CameraHardwareInterface.h
+index d39098a..247567d 100644
+--- a/services/camera/libcameraservice/device1/CameraHardwareInterface.h
++++ b/services/camera/libcameraservice/device1/CameraHardwareInterface.h
+@@ -644,6 +644,10 @@ private:
+                       buffer_handle_t* buffer)
+     {
+         ANativeWindow *a = anw(w);
++        if (!a) {
++            ALOGE("%s: ANativeWindow is NULL!", __FUNCTION__);
++            return 0;
++        }
+         return a->queueBuffer(a,
+                   container_of(buffer, ANativeWindowBuffer, handle), -1);
+     }
+@@ -652,6 +656,10 @@ private:
+                       buffer_handle_t* buffer)
+     {
+         ANativeWindow *a = anw(w);
++        if (!a) {
++            ALOGE("%s: ANativeWindow is NULL!", __FUNCTION__);
++            return 0;
++        }
+         return a->cancelBuffer(a,
+                   container_of(buffer, ANativeWindowBuffer, handle), -1);
+     }
+@@ -659,6 +667,10 @@ private:
+     static int __set_buffer_count(struct preview_stream_ops* w, int count)
+     {
+         ANativeWindow *a = anw(w);
++        if (!a) {
++            ALOGE("%s: ANativeWindow is NULL!", __FUNCTION__);
++            return 0;
++        }
+         return native_window_set_buffer_count(a, count);
+     }
+ 
+@@ -667,6 +679,10 @@ private:
+     {
+         int rc;
+         ANativeWindow *a = anw(w);
++        if (!a) {
++            ALOGE("%s: ANativeWindow is NULL!", __FUNCTION__);
++            return 0;
++        }
+ 
+         rc = native_window_set_buffers_dimensions(a, width, height);
+         if (!rc) {
+@@ -679,6 +695,10 @@ private:
+                       int left, int top, int right, int bottom)
+     {
+         ANativeWindow *a = anw(w);
++        if (!a) {
++            ALOGE("%s: ANativeWindow is NULL!", __FUNCTION__);
++            return 0;
++        }
+         android_native_rect_t crop;
+         crop.left = left;
+         crop.top = top;
+@@ -690,18 +710,30 @@ private:
+     static int __set_timestamp(struct preview_stream_ops *w,
+                                int64_t timestamp) {
+         ANativeWindow *a = anw(w);
++        if (!a) {
++            ALOGE("%s: ANativeWindow is NULL!", __FUNCTION__);
++            return 0;
++        }
+         return native_window_set_buffers_timestamp(a, timestamp);
+     }
+ 
+     static int __set_usage(struct preview_stream_ops* w, int usage)
+     {
+         ANativeWindow *a = anw(w);
++        if (!a) {
++            ALOGE("%s: ANativeWindow is NULL!", __FUNCTION__);
++            return 0;
++        }
+         return native_window_set_usage(a, usage);
+     }
+ 
+     static int __set_swap_interval(struct preview_stream_ops *w, int interval)
+     {
+         ANativeWindow *a = anw(w);
++        if (!a) {
++            ALOGE("%s: ANativeWindow is NULL!", __FUNCTION__);
++            return 0;
++        }
+         return a->setSwapInterval(a, interval);
+     }
+ 
+@@ -710,6 +742,10 @@ private:
+                       int *count)
+     {
+         ANativeWindow *a = anw(w);
++        if (!a) {
++            ALOGE("%s: ANativeWindow is NULL!", __FUNCTION__);
++            return 0;
++        }
+         return a->query(a, NATIVE_WINDOW_MIN_UNDEQUEUED_BUFFERS, count);
+     }
+ 
+-- 
+2.5.0
+
