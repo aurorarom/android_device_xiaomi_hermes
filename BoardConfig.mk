@@ -53,12 +53,17 @@ TARGET_NO_FACTORYIMAGE := true
 
 TARGET_LDPRELOAD += libxlog.so
 
+# Toolchain
+TARGET_GCC_VERSION_EXP_ARCH=4.9-cortex-a53
+TARGET_GCC_VERSION_EXP_2ND_ARCH=5.x-cortex-a53
+TARGET_KERNEL_CUSTOM_TOOLCHAIN=arm-eabi-5.X-cortex-a53
+
 # CPU
 TARGET_ARCH := arm64
 TARGET_ARCH_VARIANT := armv8-a
 TARGET_CPU_ABI := arm64-v8a
 TARGET_CPU_ABI2 := 
-TARGET_CPU_VARIANT := generic
+TARGET_CPU_VARIANT := cortex-a53
 TARGET_CPU_SMP := true
 
 TARGET_2ND_ARCH := arm
@@ -70,11 +75,11 @@ TARGET_BOARD_SUFFIX := _64
 TARGET_USES_64_BIT_BINDER := true
 
 TARGET_CPU_CORTEX_A53 := true
-
 TARGET_BOOTLOADER_BOARD_NAME := mt6795
 
 # MTK Hardware
 BOARD_HAS_MTK_HARDWARE := true
+BOARD_USES_MTK_HARDWARE := true
 MTK_HARDWARE := true
 BOARD_USES_LEGACY_MTK_AV_BLOB := true
 COMMON_GLOBAL_CFLAGS += -DMTK_HARDWARE -DADD_LEGACY_ACQUIRE_BUFFER_SYMBOL
@@ -112,8 +117,9 @@ TARGET_CPU_MEMCPY_OPT_DISABLE := true
 TARGET_KMODULES := true
 
 # Flags
-TARGET_GLOBAL_CFLAGS   += -mfpu=neon -mfloat-abi=softfp
-TARGET_GLOBAL_CPPFLAGS += -mfpu=neon -mfloat-abi=softfp
+TARGET_GLOBAL_CFLAGS   += -mtune=cortex-a53 -mfpu=neon-fp-armv8 -mfloat-abi=softfp
+TARGET_GLOBAL_CPPFLAGS += -mtune=cortex-a53 -mfpu=neon-fp-armv8 -mfloat-abi=softfp
+
 COMMON_GLOBAL_CFLAGS += -DNO_SECURE_DISCARD
 COMMON_GLOBAL_CFLAGS += -DDISABLE_HW_ID_MATCH_CHECK
 TARGET_RUNNING_WITHOUT_SYNC_FRAMEWORK := true
@@ -131,9 +137,6 @@ BOARD_CHARGER_SHOW_PERCENTAGE := true
 EXTENDED_FONT_FOOTPRINT := true
 
 TARGET_SYSTEM_PROP := $(LOCAL_PATH)/system.prop
-
-# PREBUILT_Chromium
-PRODUCT_PREBUILT_WEBVIEWCHROMIUM := yes
 
 # GPS
 BOARD_GPS_LIBRARIES :=true
@@ -298,9 +301,7 @@ BOARD_SEPOLICY_UNION := \
     install_recovery.te \
     program_binary.te \
     genfs_contexts
-
  
-
 BOARD_SEPOLICY_UNION += \
 	adbd.te \
 	bluetooth.te \
@@ -363,5 +364,8 @@ BOARD_SEPOLICY_UNION += \
 	cmddumper.te \
 	tunman.te
 
-# Speed up the build
-USE_CCACHE :=true
+# Optimizations
+USE_O3 := false
+USE_GRAPHITE := true
+USE_FLOOP := true
+USE_STRICT := true

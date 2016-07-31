@@ -228,9 +228,8 @@ PRODUCT_DEFAULT_PROPERTY_OVERRIDES := \
      camera.disable_zsl_mode=1 \
      ro.mount.fs=EXT4 \
      persist.service.acm.enable=0 \
-     persist.sys.usb.config=mtp,mass_storage \
-     persist.sys.timezone=Europe/Moscow
-
+     persist.sys.usb.config=mtp,mass_storage,adb
+     
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.kernel.android.checkjni=0 \
     ro.telephony.ril_class=MediaTekRIL \
@@ -265,7 +264,7 @@ PRODUCT_PACKAGES += \
         libfmmt6630 \
         libfmcust 
 
-PRODUCT_BUILD_PROP_OVERRIDES += BUILD_UTC_DATE=8
+PRODUCT_BUILD_PROP_OVERRIDES += BUILD_UTC_DATE=0
 
 #sdcard
 PRODUCT_COPY_FILES += \
