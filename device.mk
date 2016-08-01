@@ -121,6 +121,7 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/rootdir/init:root/init \
     $(LOCAL_PATH)/rootdir/init.storage.rc:root/init.storage.rc \
     $(LOCAL_PATH)/rootdir/init.cm.rc:root/init.cm.rc \
+    $(LOCAL_PATH)/rootdir/init.hermes.power.rc:root/init.hermes.power.rc \
 
 # Telecom
 PRODUCT_COPY_FILES += \
