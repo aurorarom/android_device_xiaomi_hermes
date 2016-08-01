@@ -178,6 +178,3 @@ keyguard.no_require_sim=true
 persist.sys.isUsbOtgEnabled=true
 camera.disable_zsl_mode=1
 persist.debug.wfd.enable=1
-
-# fix for LTE/mobile data on both SIMs
-persist.radio.mobile.data=0,0
