@@ -181,3 +181,6 @@ persist.debug.wfd.enable=1
 
 # fix for LTE/mobile data on both SIMs
 persist.radio.mobile.data=0,0
+
+# Set default power mode
+persist.sys.aries.power_profile=middle
