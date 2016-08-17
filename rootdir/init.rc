@@ -546,13 +546,6 @@ on property:vold.decrypt=trigger_shutdown_framework
 on property:sys.powerctl=*
     powerctl ${sys.powerctl}
 
-## performance mode switch
-on property:persist.sys.aries.power_profile=high
-start perfmode
-
-on property:persist.sys.aries.power_profile=middle
-start normalmode
-
 # system server cannot write to /proc/sys files,
 # and chown/chmod does not work for /proc/sys/ entries.
 # So proxy writes through init.
@@ -714,10 +707,6 @@ service flash_recovery /system/bin/install-recovery.sh
     oneshot
     disabled
 
-# update recovery if enabled
-on property:persist.sys.recovery_update=true
-    start flash_recovery
-
 service racoon /system/bin/racoon
     class main
     socket racoon stream 600 system system
@@ -780,14 +769,3 @@ service fpDaemon /system/bin/gxFpDaemon
     oneshot
 # add by GOODIX for finger print end
 
-service perfmode /system/bin/thermal_manager /system/etc/.tp/thermal.off.conf
-user root
-group root
-oneshot
-disabled
-
-service normalmode /system/bin/thermal_manager /system/etc/.tp/thermal.conf
-user root
-group root
-oneshot
-disabled
