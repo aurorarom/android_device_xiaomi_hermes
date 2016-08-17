@@ -568,6 +568,11 @@ on boot
     # xlog
     start xlogboot
 
+    # update foreground cpuset now that processors are up
+    write /dev/cpuset/foreground/cpus 0-7
+    write /dev/cpuset/background/cpus 0
+    write /dev/cpuset/system-background/cpus 0-3
+
 # Memory management.  Basic kernel parameters, and allow the high
 # level system server to be able to adjust the kernel OOM driver
 # parameters to match how it is managing things.
@@ -744,6 +749,25 @@ service start_modem /system/bin/md_ctrl 1
 ## mtk printk uart controller
 on property:persist.uartconsole.enable=1
     write /proc/mtprintk 1
+
+## performance mode switch
+on property:persist.sys.aries.power_profile=high
+    start perfmode
+
+service perfmode /system/bin/thermal_manager  /system/etc/.tp/thermal.off.conf
+    user root
+    group root
+    oneshot
+    disabled
+
+on property:persist.sys.aries.power_profile=middle
+    start normalmode
+
+service normalmode /system/bin/thermal_manager  /system/etc/.tp/thermal.conf
+    user root
+    group root
+    oneshot
+    disabled
 
 service bugreport /system/bin/dumpstate -d -p -B \
         -o /data/data/com.android.shell/files/bugreports/bugreport
