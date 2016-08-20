@@ -283,3 +283,7 @@ PRODUCT_PACKAGES += \
 PRODUCT_COPY_FILES += \
 	external/ant-wireless/antradio-library/com.dsi.ant.antradio_library.xml:system/etc/permissions/com.dsi.ant.antradio_library.xml
 
+# Camera
+PRODUCT_PACKAGES += \
+      libcamera_client_mtk
+
