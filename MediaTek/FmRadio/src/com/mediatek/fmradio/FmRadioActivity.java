@@ -106,6 +106,10 @@ public class FmRadioActivity extends Activity implements
     // Logging
     private static final String TAG = "FmRx/Activity";
 
+    private static int mAudioMode;
+    private static int playSound;
+    private final float FX_VOLUME = -1.0F;
+    
     // Dialog tags
     private static final String TAG_SEARCH = "Search";
     private static final String TAG_SAVE_RECORDINGD = "SaveRecording";
@@ -1429,6 +1433,10 @@ public class FmRadioActivity extends Activity implements
      */
     private void powerUpFm() {
         Log.v(TAG, "start powerUpFm");
+        mAudioMode = mAudioManager.getRingerMode();
+        playSound = AudioManager.FX_KEYPRESS_STANDARD;
+        mAudioManager.playSoundEffect(playSound, FX_VOLUME);
+        mAudioManager.setRingerMode(AudioManager.RINGER_MODE_VIBRATE);
         refreshImageButton(false);
         refreshActionMenuItem(false);
         refreshPopupMenuItem(false);
@@ -1848,6 +1856,7 @@ public class FmRadioActivity extends Activity implements
             }
             mIsServiceStarted = false;
         }
+        mAudioManager.setRingerMode(mAudioMode);
     }
 
     /**
