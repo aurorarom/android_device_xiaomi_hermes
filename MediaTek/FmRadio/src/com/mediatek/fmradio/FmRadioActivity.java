@@ -1195,6 +1195,7 @@ public class FmRadioActivity extends Activity implements
             mPopupMenu.dismiss();
             mPopupMenu = null;
         }
+        mAudioManager.setRingerMode(mAudioMode);
         Log.d(TAG, "end FmRadioActivity.onDestroy");
         super.onDestroy();
     }
