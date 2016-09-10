@@ -1753,12 +1753,12 @@ public class FmRadioService extends Service implements FmRecorder.OnRecorderStat
 
         try {
             mFmPlayer.prepare();
-            //if (FmRadioUtils.isFmSuspendSupport()) {
-            //    Log.d(TAG, "support FM suspend");
-            //    mFmPlayer.startWithoutWakelock();
-            //} else {
+            if (FmRadioUtils.isFmSuspendSupport()) {
+                Log.d(TAG, "support FM suspend");
+                mFmPlayer.startWithoutWakelock();
+            } else {
                 mFmPlayer.start();
-            //}
+            }
         } catch (IOException e) {
             Log.e(TAG, "Exception: Cannot call MediaPlayer prepare.", e);
         } catch (IllegalStateException e) {
@@ -1981,12 +1981,12 @@ public class FmRadioService extends Service implements FmRecorder.OnRecorderStat
                                 // set speaker mode according to AP
                                 setSpeakerPhoneOn(mIsSpeakerUsed);
                                 mFmPlayer.prepare();
-                                //if (FmRadioUtils.isFmSuspendSupport()) {
-                                //    Log.d(TAG, "support FM suspend");
-                                //    mFmPlayer.startWithoutWakelock();
-                                //} else {
+                                if (FmRadioUtils.isFmSuspendSupport()) {
+                                    Log.d(TAG, "support FM suspend");
+                                    mFmPlayer.startWithoutWakelock();
+                                } else {
                                     mFmPlayer.start();
-                                //}
+                                }
                             }
                         } catch (IOException ex) {
                             Log.e(TAG, "setDataSource: " + ex);
