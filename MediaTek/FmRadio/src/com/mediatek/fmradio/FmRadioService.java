@@ -86,6 +86,11 @@ import java.util.List;
  * Background service to control FM or do background tasks.
  */
 public class FmRadioService extends Service implements FmRecorder.OnRecorderStateChangedListener {
+    // Audio config replacer
+    private static int mAudioMode;
+    private static int playSound;
+    private final float FX_VOLUME = -1.0F;
+    
     // Logging
     private static final String TAG = "FmRx/Service";
 
@@ -529,6 +534,14 @@ public class FmRadioService extends Service implements FmRecorder.OnRecorderStat
         if (!mIsDeviceOpen) {
             mIsDeviceOpen = FmRadioNative.openDev();
         }
+
+        // set audio config
+        Log.d(TAG, "<<< AD: set audio config: RINGER_MODE_VIBRATE");
+        mAudioMode = mAudioManager.getRingerMode();
+        playSound = AudioManager.FX_KEYPRESS_STANDARD;
+        mAudioManager.playSoundEffect(playSound, FX_VOLUME);
+        mAudioManager.setRingerMode(AudioManager.RINGER_MODE_VIBRATE);
+
         Log.d(TAG, "<<< FmRadioService.openDevice: " + mIsDeviceOpen);
         return mIsDeviceOpen;
     }
@@ -546,6 +559,10 @@ public class FmRadioService extends Service implements FmRecorder.OnRecorderStat
             mIsDeviceOpen = !isDeviceClose;
         }
         Log.d(TAG, "<<< FmRadioService.closeDevice: " + isDeviceClose);
+
+        // restore audio config
+        Log.d(TAG, "<<< AD: restore audio config: "+ mAudioMode);
+        mAudioManager.setRingerMode(mAudioMode);
 
         // quit looper
         mFmServiceHandler.getLooper().quit();
